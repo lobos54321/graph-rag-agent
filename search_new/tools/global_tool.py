@@ -4,18 +4,15 @@
 基于Map-Reduce模式的跨社区查询工具
 """
 
-from typing import List, Dict, Any, Union, Optional
+from typing import List, Dict, Any, Union
 import time
 import json
-import logging
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from search_new.tools.base_tool import BaseSearchTool
 from search_new.core.global_search import GlobalSearch
-
-logger = logging.getLogger(__name__)
 
 
 class GlobalSearchTool(BaseSearchTool):
@@ -31,16 +28,16 @@ class GlobalSearchTool(BaseSearchTool):
         # 默认搜索层级
         self.default_level = self.config.global_search.default_level
         
-        logger.info(f"全局搜索工具初始化完成，默认层级: {self.default_level}")
-    
+        print(f"全局搜索工具初始化完成，默认层级: {self.default_level}")
+
     def _setup_chains(self):
         """设置处理链"""
         try:
             # 设置关键词提取链
             self._setup_keyword_chain()
-            
+
         except Exception as e:
-            logger.error(f"处理链设置失败: {e}")
+            print(f"处理链设置失败: {e}")
             raise
     
     def _setup_keyword_chain(self):
@@ -89,9 +86,9 @@ class GlobalSearchTool(BaseSearchTool):
             try:
                 keywords = json.loads(result)
             except json.JSONDecodeError:
-                logger.warning(f"关键词提取结果解析失败: {result}")
+                print(f"关键词提取结果解析失败: {result}")
                 keywords = {"low_level": [], "high_level": []}
-            
+
             # 确保包含必要的键
             if not isinstance(keywords, dict):
                 keywords = {}
@@ -99,14 +96,14 @@ class GlobalSearchTool(BaseSearchTool):
                 keywords["low_level"] = []
             if "high_level" not in keywords:
                 keywords["high_level"] = []
-            
+
             # 缓存结果
             self._set_to_cache(cache_key, keywords)
-            
+
             return keywords
-            
+
         except Exception as e:
-            logger.error(f"关键词提取失败: {e}")
+            print(f"关键词提取失败: {e}")
             self.error_stats["keyword_errors"] += 1
             return {"low_level": [], "high_level": []}
     
@@ -154,33 +151,33 @@ class GlobalSearchTool(BaseSearchTool):
             # 检查缓存
             cached_result = self._get_from_cache(cache_key)
             if cached_result:
-                logger.info(f"全局搜索缓存命中: {query[:50]}...")
+                print(f"全局搜索缓存命中: {query[:50]}...")
                 return cached_result
-            
-            logger.info(f"开始全局搜索: {query[:100]}..., 层级: {level}")
-            
+
+            print(f"开始全局搜索: {query[:100]}..., 层级: {level}")
+
             # 使用全局搜索器执行搜索
             search_start = time.time()
             result = self.global_searcher.search(query, level)
             self.performance_metrics["query_time"] = time.time() - search_start
-            
+
             # 缓存结果
             self._set_to_cache(cache_key, result)
-            
+
             # 记录性能指标
             self.performance_metrics["total_time"] = time.time() - overall_start
-            
+
             if not result or result.strip() == "":
                 return "未找到相关信息"
-            
-            logger.info(f"全局搜索完成，耗时: {self.performance_metrics['total_time']:.2f}s")
+
+            print(f"全局搜索完成，耗时: {self.performance_metrics['total_time']:.2f}s")
             return result
-            
+
         except Exception as e:
-            logger.error(f"全局搜索失败: {e}")
+            print(f"全局搜索失败: {e}")
             self.error_stats["query_errors"] += 1
             self.performance_metrics["total_time"] = time.time() - overall_start
-            
+
             return f"搜索过程中出现问题: {str(e)}"
     
     def search_with_details(self, query_input: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
@@ -222,7 +219,7 @@ class GlobalSearchTool(BaseSearchTool):
             }
             
         except Exception as e:
-            logger.error(f"详细全局搜索失败: {e}")
+            print(f"详细全局搜索失败: {e}")
             return {
                 "result": f"搜索失败: {str(e)}",
                 "query": str(query_input),
@@ -248,12 +245,12 @@ class GlobalSearchTool(BaseSearchTool):
         
         for level in levels:
             try:
-                logger.info(f"在层级 {level} 执行搜索")
+                print(f"在层级 {level} 执行搜索")
                 result = self.search({"query": query, "level": level})
                 results[level] = result
-                
+
             except Exception as e:
-                logger.error(f"层级 {level} 搜索失败: {e}")
+                print(f"层级 {level} 搜索失败: {e}")
                 results[level] = f"搜索失败: {str(e)}"
         
         return results
@@ -284,7 +281,7 @@ class GlobalSearchTool(BaseSearchTool):
             }
             
         except Exception as e:
-            logger.error(f"获取社区摘要失败: {e}")
+            print(f"获取社区摘要失败: {e}")
             return {
                 "level": level,
                 "communities_count": 0,
@@ -303,4 +300,4 @@ class GlobalSearchTool(BaseSearchTool):
                 self.global_searcher.close()
                 
         except Exception as e:
-            logger.error(f"全局搜索工具关闭失败: {e}")
+            print(f"全局搜索工具关闭失败: {e}")

@@ -4,14 +4,11 @@
 支持在知识图谱中进行多步探索和推理
 """
 
-from typing import List, Dict, Any, Optional, Set, Tuple
+from typing import List, Dict, Any, Optional, Set
 import time
-import logging
 from dataclasses import dataclass, field
 
 from search_new.config import get_reasoning_config
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -76,7 +73,7 @@ class ChainedExploration:
         self.current_path_id: Optional[str] = None
         self.visited_nodes: Set[str] = set()
         
-        logger.info(f"链式探索初始化完成，最大步数: {self.max_steps}")
+        print(f"链式探索初始化完成，最大步数: {self.max_steps}")
     
     def start_exploration(self, query: str, seed_entities: List[str]) -> str:
         """
@@ -113,11 +110,11 @@ class ChainedExploration:
             self.exploration_paths[path_id] = path
             self.current_path_id = path_id
             
-            logger.info(f"开始探索: {path_id}，种子实体: {len(seed_entities)}")
+            print(f"开始探索: {path_id}，种子实体: {len(seed_entities)}")
             return path_id
             
         except Exception as e:
-            logger.error(f"开始探索失败: {e}")
+            print(f"开始探索失败: {e}")
             return ""
     
     def explore_next_step(self, path_id: Optional[str] = None) -> Dict[str, Any]:
@@ -172,7 +169,7 @@ class ChainedExploration:
             
             path.updated_at = time.time()
             
-            logger.info(f"探索步骤完成，新增节点: {len(filtered_nodes)}")
+            print(f"探索步骤完成，新增节点: {len(filtered_nodes)}")
             
             return {
                 "status": "continue",
@@ -182,7 +179,7 @@ class ChainedExploration:
             }
             
         except Exception as e:
-            logger.error(f"探索步骤失败: {e}")
+            print(f"探索步骤失败: {e}")
             return {"status": "error", "message": str(e)}
     
     def _explore_neighbors(self, node: ExplorationNode, query: str) -> List[ExplorationNode]:
@@ -258,7 +255,7 @@ class ChainedExploration:
             return neighbors
             
         except Exception as e:
-            logger.error(f"探索邻居失败: {e}")
+            print(f"探索邻居失败: {e}")
             return []
     
     def _filter_and_rank_nodes(self, nodes: List[ExplorationNode], query: str) -> List[ExplorationNode]:
@@ -306,7 +303,7 @@ class ChainedExploration:
             return filtered_nodes
             
         except Exception as e:
-            logger.error(f"节点过滤排序失败: {e}")
+            print(f"节点过滤排序失败: {e}")
             return nodes
     
     def get_exploration_summary(self, path_id: Optional[str] = None) -> Dict[str, Any]:
@@ -365,7 +362,7 @@ class ChainedExploration:
             }
             
         except Exception as e:
-            logger.error(f"获取探索摘要失败: {e}")
+            print(f"获取探索摘要失败: {e}")
             return {"error": str(e)}
     
     def get_exploration_path(self, path_id: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -412,7 +409,7 @@ class ChainedExploration:
             bool: 是否成功
         """
         if not self.enable_backtracking:
-            logger.warning("回溯功能未启用")
+            print("回溯功能未启用")
             return False
         
         if path_id is None:
@@ -436,11 +433,11 @@ class ChainedExploration:
             for node in removed_nodes:
                 self.visited_nodes.discard(node.node_id)
             
-            logger.info(f"回溯到深度 {target_depth}，移除节点: {len(removed_nodes)}")
+            print(f"回溯到深度 {target_depth}，移除节点: {len(removed_nodes)}")
             return True
             
         except Exception as e:
-            logger.error(f"回溯失败: {e}")
+            print(f"回溯失败: {e}")
             return False
     
     def clear_path(self, path_id: Optional[str] = None):
@@ -459,11 +456,11 @@ class ChainedExploration:
             if path_id == self.current_path_id:
                 self.current_path_id = None
             
-            logger.info(f"清空探索路径: {path_id}")
+            print(f"清空探索路径: {path_id}")
     
     def close(self):
         """关闭链式探索"""
         self.exploration_paths.clear()
         self.current_path_id = None
         self.visited_nodes.clear()
-        logger.info("链式探索已关闭")
+        print("链式探索已关闭")

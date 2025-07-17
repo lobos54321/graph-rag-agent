@@ -1,21 +1,18 @@
 """
 简单搜索工具
 
-仅使用向量搜索的简单实现，适合作为备选方案
+仅使用向量搜索的简单实现
 """
 
-from typing import List, Dict, Any, Union, Optional
+from typing import List, Dict, Any, Union
 import time
 import json
-import logging
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from config.neo4jdb import get_db_manager
 from search_new.tools.base_tool import BaseSearchTool
-
-logger = logging.getLogger(__name__)
 
 
 class NaiveSearchTool(BaseSearchTool):
@@ -33,7 +30,7 @@ class NaiveSearchTool(BaseSearchTool):
         self.db_manager = get_db_manager()
         self.graph = self.db_manager.get_graph()
         
-        logger.info("简单搜索工具初始化完成")
+        print("简单搜索工具初始化完成")
     
     def _setup_chains(self):
         """设置处理链"""
@@ -45,7 +42,7 @@ class NaiveSearchTool(BaseSearchTool):
             self._setup_answer_chain()
             
         except Exception as e:
-            logger.error(f"处理链设置失败: {e}")
+            print(f"处理链设置失败: {e}")
             raise
     
     def _setup_keyword_chain(self):
@@ -112,7 +109,7 @@ class NaiveSearchTool(BaseSearchTool):
             try:
                 keywords = json.loads(result)
             except json.JSONDecodeError:
-                logger.warning(f"关键词提取结果解析失败: {result}")
+                print(f"关键词提取结果解析失败: {result}")
                 keywords = {"low_level": [], "high_level": []}
             
             # 确保包含必要的键
@@ -129,7 +126,7 @@ class NaiveSearchTool(BaseSearchTool):
             return keywords
             
         except Exception as e:
-            logger.error(f"关键词提取失败: {e}")
+            print(f"关键词提取失败: {e}")
             self.error_stats["keyword_errors"] += 1
             return {"low_level": [], "high_level": []}
     
@@ -184,11 +181,11 @@ class NaiveSearchTool(BaseSearchTool):
                     "chunk_id": result_data['chunk_id']
                 })
             
-            logger.info(f"向量搜索找到 {len(chunks)} 个相关块")
+            print(f"向量搜索找到 {len(chunks)} 个相关块")
             return chunks
             
         except Exception as e:
-            logger.error(f"向量搜索失败: {e}")
+            print(f"向量搜索失败: {e}")
             self.error_stats["query_errors"] += 1
             return []
     
@@ -232,11 +229,11 @@ class NaiveSearchTool(BaseSearchTool):
                     "chunk_id": result_data['chunk_id']
                 })
             
-            logger.info(f"文本搜索找到 {len(chunks)} 个相关块")
+            print(f"文本搜索找到 {len(chunks)} 个相关块")
             return chunks
             
         except Exception as e:
-            logger.error(f"文本搜索失败: {e}")
+            print(f"文本搜索失败: {e}")
             return []
     
     def _generate_answer(self, query: str, chunks: List[Dict[str, Any]]) -> str:
@@ -273,7 +270,7 @@ class NaiveSearchTool(BaseSearchTool):
             return answer
             
         except Exception as e:
-            logger.error(f"答案生成失败: {e}")
+            print(f"答案生成失败: {e}")
             return f"答案生成过程中出现问题: {str(e)}"
     
     def search(self, query_input: Union[str, Dict[str, Any]]) -> str:
@@ -304,17 +301,17 @@ class NaiveSearchTool(BaseSearchTool):
             # 检查缓存
             cached_result = self._get_from_cache(cache_key)
             if cached_result:
-                logger.info(f"简单搜索缓存命中: {query[:50]}...")
+                print(f"简单搜索缓存命中: {query[:50]}...")
                 return cached_result
             
-            logger.info(f"开始简单搜索: {query[:100]}...")
+            print(f"开始简单搜索: {query[:100]}...")
             
             # 执行向量搜索
             chunks = self._vector_search_chunks(query)
             
             # 如果向量搜索没有结果，尝试文本搜索
             if not chunks:
-                logger.info("向量搜索无结果，尝试文本搜索")
+                print("向量搜索无结果，尝试文本搜索")
                 chunks = self._text_search_fallback(query)
             
             # 生成答案
@@ -326,11 +323,11 @@ class NaiveSearchTool(BaseSearchTool):
             # 记录性能指标
             self.performance_metrics["total_time"] = time.time() - overall_start
             
-            logger.info(f"简单搜索完成，耗时: {self.performance_metrics['total_time']:.2f}s")
+            print(f"简单搜索完成，耗时: {self.performance_metrics['total_time']:.2f}s")
             return result
             
         except Exception as e:
-            logger.error(f"简单搜索失败: {e}")
+            print(f"简单搜索失败: {e}")
             self.error_stats["query_errors"] += 1
             self.performance_metrics["total_time"] = time.time() - overall_start
             
@@ -381,7 +378,7 @@ class NaiveSearchTool(BaseSearchTool):
             }
             
         except Exception as e:
-            logger.error(f"详细简单搜索失败: {e}")
+            print(f"详细简单搜索失败: {e}")
             return {
                 "result": f"搜索失败: {str(e)}",
                 "query": str(query_input),
@@ -403,4 +400,4 @@ class NaiveSearchTool(BaseSearchTool):
                 self.graph.close()
                 
         except Exception as e:
-            logger.error(f"简单搜索工具关闭失败: {e}")
+            print(f"简单搜索工具关闭失败: {e}")

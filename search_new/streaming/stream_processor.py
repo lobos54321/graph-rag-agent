@@ -4,15 +4,11 @@
 核心流式处理功能，支持文本分块、状态管理和异步输出
 """
 
-from typing import AsyncGenerator, Generator, List, Dict, Any, Optional, Union
+from typing import AsyncGenerator, Generator, List, Dict, Any, Optional
 import asyncio
 import time
-import logging
 from dataclasses import dataclass, field
 from enum import Enum
-
-logger = logging.getLogger(__name__)
-
 
 class StreamStatus(Enum):
     """流式状态枚举"""
@@ -65,7 +61,7 @@ class StreamProcessor:
         self.max_concurrent_streams = 10
         self.stream_timeout = 300  # 5分钟
         
-        logger.info(f"流式处理器初始化完成，分块大小: {chunk_size}")
+        print(f"流式处理器初始化完成，分块大小: {chunk_size}")
     
     async def stream_text(self, text: str, session_id: Optional[str] = None) -> AsyncGenerator[StreamChunk, None]:
         """
@@ -150,7 +146,7 @@ class StreamProcessor:
             
         except Exception as e:
             self.status = StreamStatus.ERROR
-            logger.error(f"流式处理失败: {e}")
+            print(f"流式处理失败: {e}")
             yield StreamChunk(
                 content="",
                 chunk_type="error",
@@ -232,7 +228,7 @@ class StreamProcessor:
             
         except Exception as e:
             self.status = StreamStatus.ERROR
-            logger.error(f"同步流式处理失败: {e}")
+            print(f"同步流式处理失败: {e}")
             yield StreamChunk(
                 content="",
                 chunk_type="error",
@@ -284,7 +280,7 @@ class StreamProcessor:
             return chunks if chunks else [text]
             
         except Exception as e:
-            logger.error(f"文本分块失败: {e}")
+            print(f"文本分块失败: {e}")
             return [text]
     
     def _register_stream(self, session_id: str, metadata: Dict[str, Any]):
@@ -304,20 +300,20 @@ class StreamProcessor:
                 "registered_at": time.time()
             }
             
-            logger.debug(f"注册流式会话: {session_id}")
+            print(f"注册流式会话: {session_id}")
             
         except Exception as e:
-            logger.error(f"注册流式会话失败: {e}")
+            print(f"注册流式会话失败: {e}")
     
     def _unregister_stream(self, session_id: str):
         """注销流式会话"""
         try:
             if session_id in self.active_streams:
                 del self.active_streams[session_id]
-                logger.debug(f"注销流式会话: {session_id}")
+                print(f"注销流式会话: {session_id}")
                 
         except Exception as e:
-            logger.error(f"注销流式会话失败: {e}")
+            print(f"注销流式会话失败: {e}")
     
     def _is_stream_active(self, session_id: str) -> bool:
         """检查流式会话是否活跃"""
@@ -336,10 +332,10 @@ class StreamProcessor:
             
             for session_id in expired_sessions:
                 self._unregister_stream(session_id)
-                logger.info(f"清理过期流式会话: {session_id}")
+                print(f"清理过期流式会话: {session_id}")
                 
         except Exception as e:
-            logger.error(f"清理过期会话失败: {e}")
+            print(f"清理过期会话失败: {e}")
     
     def cancel_stream(self, session_id: str) -> bool:
         """
@@ -354,12 +350,12 @@ class StreamProcessor:
         try:
             if session_id in self.active_streams:
                 self.active_streams[session_id]["status"] = "cancelled"
-                logger.info(f"取消流式会话: {session_id}")
+                print(f"取消流式会话: {session_id}")
                 return True
             return False
             
         except Exception as e:
-            logger.error(f"取消流式会话失败: {e}")
+            print(f"取消流式会话失败: {e}")
             return False
     
     def get_stream_status(self, session_id: str) -> Optional[Dict[str, Any]]:
@@ -378,7 +374,7 @@ class StreamProcessor:
             return None
             
         except Exception as e:
-            logger.error(f"获取流式状态失败: {e}")
+            print(f"获取流式状态失败: {e}")
             return None
     
     def get_active_streams(self) -> Dict[str, Dict[str, Any]]:
@@ -400,10 +396,10 @@ class StreamProcessor:
             self.active_streams.clear()
             self.status = StreamStatus.COMPLETED
             
-            logger.info("流式处理器已关闭")
+            print("流式处理器已关闭")
             
         except Exception as e:
-            logger.error(f"流式处理器关闭失败: {e}")
+            print(f"流式处理器关闭失败: {e}")
 
 
 # 全局流式处理器实例

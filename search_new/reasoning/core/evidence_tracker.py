@@ -4,16 +4,12 @@
 收集和管理推理过程中使用的证据，提高透明度和可解释性
 """
 
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional
 import time
 import hashlib
-import logging
 from dataclasses import dataclass, field
 
 from search_new.config import get_reasoning_config
-
-logger = logging.getLogger(__name__)
-
 
 @dataclass
 class Evidence:
@@ -81,7 +77,7 @@ class EvidenceTracker:
         self.evidence_chains: Dict[str, EvidenceChain] = {}
         self.current_chain_id: Optional[str] = None
         
-        logger.info(f"证据跟踪器初始化完成，最大证据项: {self.max_evidence_items}")
+        print(f"证据跟踪器初始化完成，最大证据项: {self.max_evidence_items}")
     
     def create_evidence_chain(self, query: str) -> str:
         """
@@ -103,7 +99,7 @@ class EvidenceTracker:
         self.evidence_chains[chain_id] = chain
         self.current_chain_id = chain_id
         
-        logger.info(f"创建证据链: {chain_id}")
+        print(f"创建证据链: {chain_id}")
         return chain_id
     
     def add_evidence(self, source_id: str, content: str, source_type: str,
@@ -125,7 +121,7 @@ class EvidenceTracker:
             str: 证据ID
         """
         if not self.current_chain_id:
-            logger.warning("没有活跃的证据链")
+            print("没有活跃的证据链")
             return ""
         
         chain = self.evidence_chains[self.current_chain_id]
@@ -135,17 +131,17 @@ class EvidenceTracker:
         
         # 检查重复（如果启用去重）
         if self.enable_deduplication and evidence_id in chain.evidence_items:
-            logger.debug(f"证据已存在，跳过: {evidence_id}")
+            print(f"证据已存在，跳过: {evidence_id}")
             return evidence_id
         
         # 检查相关性阈值
         if relevance_score < self.relevance_threshold:
-            logger.debug(f"证据相关性过低，跳过: {relevance_score}")
+            print(f"证据相关性过低，跳过: {relevance_score}")
             return ""
         
         # 检查证据数量限制
         if len(chain.evidence_items) >= self.max_evidence_items:
-            logger.warning("证据项数量已达上限")
+            print("证据项数量已达上限")
             # 可以选择移除最旧的证据或相关性最低的证据
             self._remove_least_relevant_evidence(chain)
         
@@ -163,7 +159,7 @@ class EvidenceTracker:
         # 验证证据（如果启用）
         if self.enable_validation:
             if not self._validate_evidence(evidence):
-                logger.warning(f"证据验证失败: {evidence_id}")
+                print(f"证据验证失败: {evidence_id}")
                 return ""
         
         # 存储证据
@@ -174,7 +170,7 @@ class EvidenceTracker:
         if step_id:
             self._associate_evidence_to_step(chain, step_id, evidence_id)
         
-        logger.debug(f"添加证据: {evidence_id} (类型: {source_type})")
+        print(f"添加证据: {evidence_id} (类型: {source_type})")
         return evidence_id
     
     def add_reasoning_step(self, description: str, reasoning_type: str = "general",
@@ -192,7 +188,7 @@ class EvidenceTracker:
             str: 步骤ID
         """
         if not self.current_chain_id:
-            logger.warning("没有活跃的证据链")
+            print("没有活跃的证据链")
             return ""
         
         chain = self.evidence_chains[self.current_chain_id]
@@ -213,7 +209,7 @@ class EvidenceTracker:
         chain.reasoning_steps.append(step)
         chain.updated_at = time.time()
         
-        logger.debug(f"添加推理步骤: {step_id} (类型: {reasoning_type})")
+        print(f"添加推理步骤: {step_id} (类型: {reasoning_type})")
         return step_id
     
     def _associate_evidence_to_step(self, chain: EvidenceChain, step_id: str, evidence_id: str):
@@ -251,7 +247,7 @@ class EvidenceTracker:
             return True
             
         except Exception as e:
-            logger.error(f"证据验证失败: {e}")
+            print(f"证据验证失败: {e}")
             return False
     
     def _remove_least_relevant_evidence(self, chain: EvidenceChain):
@@ -277,7 +273,7 @@ class EvidenceTracker:
                 if least_relevant_id in step.evidence_ids:
                     step.evidence_ids.remove(least_relevant_id)
             
-            logger.debug(f"移除低相关性证据: {least_relevant_id}")
+            print(f"移除低相关性证据: {least_relevant_id}")
     
     def get_evidence_chain_summary(self, chain_id: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -418,10 +414,10 @@ class EvidenceTracker:
             if chain_id == self.current_chain_id:
                 self.current_chain_id = None
             
-            logger.info(f"清空证据链: {chain_id}")
+            print(f"清空证据链: {chain_id}")
     
     def close(self):
         """关闭证据跟踪器"""
         self.evidence_chains.clear()
         self.current_chain_id = None
-        logger.info("证据跟踪器已关闭")
+        print("证据跟踪器已关闭")

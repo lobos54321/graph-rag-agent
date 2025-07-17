@@ -4,18 +4,14 @@
 管理多轮迭代的思考过程，支持分支推理和反事实分析
 """
 
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional
 import time
-import json
-import logging
 from dataclasses import dataclass, field
 
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from search_new.config import get_reasoning_config
 from search_new.reasoning.utils.nlp_utils import extract_queries_from_text, clean_text
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -74,7 +70,7 @@ class ThinkingEngine:
         # 消息历史
         self.msg_history: List[Any] = []
         
-        logger.info(f"思考引擎初始化完成，最大深度: {self.max_depth}")
+        print(f"思考引擎初始化完成，最大深度: {self.max_depth}")
     
     def create_session(self, query: str) -> str:
         """
@@ -102,7 +98,7 @@ class ThinkingEngine:
             HumanMessage(content=f"请分析以下问题并进行深入思考：\n\n{query}")
         ]
         
-        logger.info(f"创建思考会话: {session_id}")
+        print(f"创建思考会话: {session_id}")
         return session_id
     
     def _get_system_prompt(self) -> str:
@@ -150,7 +146,7 @@ class ThinkingEngine:
             
             # 检查超时
             if time.time() - start_time > self.timeout:
-                logger.warning("思考过程超时")
+                print("思考过程超时")
                 return {
                     "status": "timeout",
                     "content": "思考过程超时",
@@ -190,7 +186,7 @@ class ThinkingEngine:
             else:
                 status = "continue_thinking"
             
-            logger.info(f"生成思考步骤 {step_id}，状态: {status}，查询数: {len(queries)}")
+            print(f"生成思考步骤 {step_id}，状态: {status}，查询数: {len(queries)}")
             
             return {
                 "status": status,
@@ -200,7 +196,7 @@ class ThinkingEngine:
             }
             
         except Exception as e:
-            logger.error(f"生成查询失败: {e}")
+            print(f"生成查询失败: {e}")
             return {
                 "status": "error",
                 "content": f"生成查询失败: {str(e)}",
@@ -224,7 +220,7 @@ class ThinkingEngine:
             # 限制查询数量
             if len(queries) > self.max_queries_per_step:
                 queries = queries[:self.max_queries_per_step]
-                logger.info(f"查询数量超限，截取前 {self.max_queries_per_step} 个")
+                print(f"查询数量超限，截取前 {self.max_queries_per_step} 个")
             
             # 清理和验证查询
             cleaned_queries = []
@@ -236,7 +232,7 @@ class ThinkingEngine:
             return cleaned_queries
             
         except Exception as e:
-            logger.error(f"提取查询失败: {e}")
+            print(f"提取查询失败: {e}")
             return []
     
     def _is_answer_ready(self, content: str) -> bool:
@@ -283,7 +279,7 @@ class ThinkingEngine:
                 content=f"已执行查询 '{query}'，请继续思考。"
             ))
         
-        logger.debug(f"添加执行查询: {query}")
+        print(f"添加执行查询: {query}")
     
     def add_reasoning_step(self, info: str):
         """
@@ -299,7 +295,7 @@ class ThinkingEngine:
             content=f"获得新信息：\n{info}\n\n请基于这些信息继续分析。"
         ))
         
-        logger.debug("添加推理步骤信息")
+        print("添加推理步骤信息")
     
     def get_session_summary(self, session_id: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -384,11 +380,11 @@ class ThinkingEngine:
                 self.current_session_id = None
                 self.msg_history = []
             
-            logger.info(f"重置思考会话: {session_id}")
+            print(f"重置思考会话: {session_id}")
     
     def close(self):
         """关闭思考引擎"""
         self.sessions.clear()
         self.current_session_id = None
         self.msg_history = []
-        logger.info("思考引擎已关闭")
+        print("思考引擎已关闭")

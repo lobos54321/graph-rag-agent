@@ -1,23 +1,16 @@
 """
 异步处理器
-
-提供异步回调处理和流式管理功能
 """
 
 import asyncio
-import queue
-import threading
 import time
-import logging
-from typing import Any, Dict, List, Optional, AsyncGenerator, Callable
+from typing import Any, Dict, List, Optional, AsyncGenerator
 from dataclasses import dataclass, field
 
-from langchain_core.callbacks import AsyncCallbackHandler, BaseCallbackHandler
+from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.outputs import LLMResult
 
-from .stream_processor import StreamChunk, StreamStatus
-
-logger = logging.getLogger(__name__)
+from .stream_processor import StreamChunk
 
 
 @dataclass
@@ -47,7 +40,7 @@ class AsyncIteratorCallbackHandler(AsyncCallbackHandler):
         self.start_time = None
         self.end_time = None
         
-        logger.debug("异步迭代器回调处理器初始化完成")
+        print("异步迭代器回调处理器初始化完成")
     
     async def on_llm_start(self, serialized: Dict[str, Any], prompts: List[str], **kwargs: Any) -> None:
         """LLM开始时的回调"""
@@ -61,7 +54,7 @@ class AsyncIteratorCallbackHandler(AsyncCallbackHandler):
             metadata={"prompts_count": len(prompts)}
         ))
         
-        logger.debug("LLM开始生成")
+        print("LLM开始生成")
     
     async def on_llm_new_token(self, token: str, **kwargs: Any) -> None:
         """新token生成时的回调"""
@@ -89,7 +82,7 @@ class AsyncIteratorCallbackHandler(AsyncCallbackHandler):
             }
         ))
         
-        logger.debug(f"LLM生成完成，token数: {self.token_count}, 耗时: {duration:.2f}s")
+        print(f"LLM生成完成，token数: {self.token_count}, 耗时: {duration:.2f}s")
     
     async def on_llm_error(self, error: Exception, **kwargs: Any) -> None:
         """LLM错误时的回调"""
@@ -102,7 +95,7 @@ class AsyncIteratorCallbackHandler(AsyncCallbackHandler):
             metadata={"error_type": type(error).__name__}
         ))
         
-        logger.error(f"LLM生成错误: {error}")
+        print(f"LLM生成错误: {error}")
     
     async def aiter(self) -> AsyncGenerator[StreamEvent, None]:
         """异步迭代器"""
@@ -122,7 +115,7 @@ class AsyncIteratorCallbackHandler(AsyncCallbackHandler):
                     break
                 continue
             except Exception as e:
-                logger.error(f"异步迭代器错误: {e}")
+                print(f"异步迭代器错误: {e}")
                 break
     
     def reset(self):
@@ -160,7 +153,7 @@ class AsyncStreamManager:
         self.completed_sessions = 0
         self.failed_sessions = 0
         
-        logger.info(f"异步流式管理器初始化完成，最大并发: {max_concurrent_streams}")
+        print(f"异步流式管理器初始化完成，最大并发: {max_concurrent_streams}")
     
     async def create_stream_session(self, session_id: Optional[str] = None) -> str:
         """
@@ -193,11 +186,11 @@ class AsyncStreamManager:
             
             self.total_sessions += 1
             
-            logger.debug(f"创建流式会话: {session_id}")
+            print(f"创建流式会话: {session_id}")
             return session_id
             
         except Exception as e:
-            logger.error(f"创建流式会话失败: {e}")
+            print(f"创建流式会话失败: {e}")
             raise
     
     async def start_stream(self, session_id: str) -> AsyncGenerator[StreamChunk, None]:
@@ -270,7 +263,7 @@ class AsyncStreamManager:
                     break
             
         except Exception as e:
-            logger.error(f"流式输出失败: {e}")
+            print(f"流式输出失败: {e}")
             if session_id in self.active_sessions:
                 self.active_sessions[session_id]["status"] = "failed"
                 self.active_sessions[session_id]["error"] = str(e)
@@ -299,10 +292,10 @@ class AsyncStreamManager:
             if session_id in self.session_handlers:
                 del self.session_handlers[session_id]
             
-            logger.debug(f"清理流式会话: {session_id}")
+            print(f"清理流式会话: {session_id}")
             
         except Exception as e:
-            logger.error(f"清理会话失败: {e}")
+            print(f"清理会话失败: {e}")
     
     def get_session_handler(self, session_id: str) -> Optional[AsyncIteratorCallbackHandler]:
         """
@@ -356,10 +349,10 @@ class AsyncStreamManager:
             for session_id in session_ids:
                 await self.cleanup_session(session_id)
             
-            logger.info("异步流式管理器已关闭")
+            print("异步流式管理器已关闭")
             
         except Exception as e:
-            logger.error(f"异步流式管理器关闭失败: {e}")
+            print(f"异步流式管理器关闭失败: {e}")
 
 
 # 全局异步流式管理器实例

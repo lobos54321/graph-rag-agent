@@ -4,10 +4,9 @@
 结合本地搜索和全局搜索的混合策略，参考lightrag的双级检索思想
 """
 
-from typing import List, Dict, Any, Union, Optional
+from typing import List, Dict, Any, Union
 import time
 import json
-import logging
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -15,8 +14,6 @@ from langchain_core.output_parsers import StrOutputParser
 from search_new.tools.base_tool import BaseSearchTool
 from search_new.tools.local_tool import LocalSearchTool
 from search_new.tools.global_tool import GlobalSearchTool
-
-logger = logging.getLogger(__name__)
 
 
 class HybridSearchTool(BaseSearchTool):
@@ -35,7 +32,7 @@ class HybridSearchTool(BaseSearchTool):
         self.global_weight = 0.4  # 全局搜索权重
         self.enable_parallel = True  # 是否并行执行搜索
         
-        logger.info("混合搜索工具初始化完成")
+        print("混合搜索工具初始化完成")
     
     def _setup_chains(self):
         """设置处理链"""
@@ -50,7 +47,7 @@ class HybridSearchTool(BaseSearchTool):
             self._setup_classification_chain()
             
         except Exception as e:
-            logger.error(f"处理链设置失败: {e}")
+            print(f"处理链设置失败: {e}")
             raise
     
     def _setup_keyword_chain(self):
@@ -143,7 +140,7 @@ class HybridSearchTool(BaseSearchTool):
             try:
                 keywords = json.loads(result)
             except json.JSONDecodeError:
-                logger.warning(f"关键词提取结果解析失败: {result}")
+                print(f"关键词提取结果解析失败: {result}")
                 keywords = {"low_level": [], "high_level": []}
             
             # 确保包含必要的键
@@ -160,7 +157,7 @@ class HybridSearchTool(BaseSearchTool):
             return keywords
             
         except Exception as e:
-            logger.error(f"关键词提取失败: {e}")
+            print(f"关键词提取失败: {e}")
             self.error_stats["keyword_errors"] += 1
             return {"low_level": [], "high_level": []}
     
@@ -180,7 +177,7 @@ class HybridSearchTool(BaseSearchTool):
             try:
                 classification = json.loads(result)
             except json.JSONDecodeError:
-                logger.warning(f"查询分类结果解析失败: {result}")
+                print(f"查询分类结果解析失败: {result}")
                 classification = {
                     "search_strategy": "hybrid",
                     "confidence": 0.5,
@@ -190,7 +187,7 @@ class HybridSearchTool(BaseSearchTool):
             return classification
             
         except Exception as e:
-            logger.error(f"查询分类失败: {e}")
+            print(f"查询分类失败: {e}")
             return {
                 "search_strategy": "hybrid",
                 "confidence": 0.5,
@@ -202,7 +199,7 @@ class HybridSearchTool(BaseSearchTool):
         try:
             return self.local_tool.search(query)
         except Exception as e:
-            logger.error(f"本地搜索执行失败: {e}")
+            print(f"本地搜索执行失败: {e}")
             return f"本地搜索失败: {str(e)}"
     
     def _execute_global_search(self, query: str) -> str:
@@ -210,7 +207,7 @@ class HybridSearchTool(BaseSearchTool):
         try:
             return self.global_tool.search(query)
         except Exception as e:
-            logger.error(f"全局搜索执行失败: {e}")
+            print(f"全局搜索执行失败: {e}")
             return f"全局搜索失败: {str(e)}"
     
     def _fuse_results(self, query: str, local_result: str, global_result: str) -> str:
@@ -242,7 +239,7 @@ class HybridSearchTool(BaseSearchTool):
             return fused_result
             
         except Exception as e:
-            logger.error(f"结果融合失败: {e}")
+            print(f"结果融合失败: {e}")
             # 如果融合失败，返回较长的结果
             if len(local_result) > len(global_result):
                 return local_result
@@ -277,16 +274,16 @@ class HybridSearchTool(BaseSearchTool):
             # 检查缓存
             cached_result = self._get_from_cache(cache_key)
             if cached_result:
-                logger.info(f"混合搜索缓存命中: {query[:50]}...")
+                print(f"混合搜索缓存命中: {query[:50]}...")
                 return cached_result
             
-            logger.info(f"开始混合搜索: {query[:100]}...")
+            print(f"开始混合搜索: {query[:100]}...")
             
             # 如果没有指定策略，则自动分类
             if strategy is None:
                 classification = self._classify_query(query)
                 strategy = classification["search_strategy"]
-                logger.info(f"查询分类结果: {strategy} (置信度: {classification['confidence']})")
+                print(f"查询分类结果: {strategy} (置信度: {classification['confidence']})")
             
             # 根据策略执行搜索
             search_start = time.time()
@@ -314,11 +311,11 @@ class HybridSearchTool(BaseSearchTool):
             if not result or result.strip() == "":
                 return "未找到相关信息"
             
-            logger.info(f"混合搜索完成，耗时: {self.performance_metrics['total_time']:.2f}s")
+            print(f"混合搜索完成，耗时: {self.performance_metrics['total_time']:.2f}s")
             return result
             
         except Exception as e:
-            logger.error(f"混合搜索失败: {e}")
+            print(f"混合搜索失败: {e}")
             self.error_stats["query_errors"] += 1
             self.performance_metrics["total_time"] = time.time() - overall_start
             
@@ -366,7 +363,7 @@ class HybridSearchTool(BaseSearchTool):
             }
             
         except Exception as e:
-            logger.error(f"详细混合搜索失败: {e}")
+            print(f"详细混合搜索失败: {e}")
             return {
                 "result": f"搜索失败: {str(e)}",
                 "query": str(query_input),
@@ -390,4 +387,4 @@ class HybridSearchTool(BaseSearchTool):
                 self.global_tool.close()
                 
         except Exception as e:
-            logger.error(f"混合搜索工具关闭失败: {e}")
+            print(f"混合搜索工具关闭失败: {e}")

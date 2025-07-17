@@ -4,15 +4,11 @@
 支持同时使用多种方式搜索知识库
 """
 
-from typing import List, Dict, Any, Optional, Callable, Tuple
+from typing import List, Dict, Any, Callable
 import time
-import asyncio
-import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from search_new.config import get_reasoning_config
-
-logger = logging.getLogger(__name__)
 
 
 class DualPathSearcher:
@@ -54,7 +50,7 @@ class DualPathSearcher:
         # 搜索历史
         self.search_history: List[Dict[str, Any]] = []
         
-        logger.info(f"双路径搜索器初始化完成，知识库: {kb_name}")
+        print(f"双路径搜索器初始化完成，知识库: {kb_name}")
     
     def search(self, query: str, search_type: str = "both") -> List[str]:
         """
@@ -70,7 +66,7 @@ class DualPathSearcher:
         start_time = time.time()
         
         try:
-            logger.info(f"开始双路径搜索: {query[:50]}... (类型: {search_type})")
+            print(f"开始双路径搜索: {query[:50]}... (类型: {search_type})")
             
             results = []
             
@@ -87,11 +83,11 @@ class DualPathSearcher:
             # 记录搜索历史
             self._record_search_history(query, search_type, results, time.time() - start_time)
             
-            logger.info(f"双路径搜索完成，结果数: {len(results)}")
+            print(f"双路径搜索完成，结果数: {len(results)}")
             return results
             
         except Exception as e:
-            logger.error(f"双路径搜索失败: {e}")
+            print(f"双路径搜索失败: {e}")
             return []
     
     def _search_kb_only(self, query: str) -> List[str]:
@@ -99,7 +95,7 @@ class DualPathSearcher:
         try:
             return self.kb_retrieve_func(query)
         except Exception as e:
-            logger.error(f"知识库搜索失败: {e}")
+            print(f"知识库搜索失败: {e}")
             return []
     
     def _search_kg_only(self, query: str) -> List[str]:
@@ -107,7 +103,7 @@ class DualPathSearcher:
         try:
             return self.kg_retrieve_func(query)
         except Exception as e:
-            logger.error(f"知识图谱搜索失败: {e}")
+            print(f"知识图谱搜索失败: {e}")
             return []
     
     def _search_parallel(self, query: str) -> List[str]:
@@ -130,13 +126,13 @@ class DualPathSearcher:
                         if result:
                             results[search_type] = result
                     except Exception as e:
-                        logger.error(f"{search_type}搜索失败: {e}")
+                        print(f"{search_type}搜索失败: {e}")
                 
                 # 融合结果
                 return self._merge_results(results["kb"], results["kg"])
                 
         except Exception as e:
-            logger.error(f"并行搜索失败: {e}")
+            print(f"并行搜索失败: {e}")
             # 降级到顺序搜索
             return self._search_sequential(query)
     
@@ -149,7 +145,7 @@ class DualPathSearcher:
             return self._merge_results(kb_results, kg_results)
             
         except Exception as e:
-            logger.error(f"顺序搜索失败: {e}")
+            print(f"顺序搜索失败: {e}")
             return []
     
     def _merge_results(self, kb_results: List[str], kg_results: List[str]) -> List[str]:
@@ -183,7 +179,7 @@ class DualPathSearcher:
             return merged_results
             
         except Exception as e:
-            logger.error(f"结果融合失败: {e}")
+            print(f"结果融合失败: {e}")
             # 简单合并
             return kb_results + kg_results
     
@@ -207,7 +203,7 @@ class DualPathSearcher:
             return self.search(enhanced_query, search_type)
             
         except Exception as e:
-            logger.error(f"上下文搜索失败: {e}")
+            print(f"上下文搜索失败: {e}")
             return self.search(query, search_type)
     
     def batch_search(self, queries: List[str], search_type: str = "both") -> Dict[str, List[str]]:
@@ -238,7 +234,7 @@ class DualPathSearcher:
                             result = future.result()
                             results[query] = result
                         except Exception as e:
-                            logger.error(f"批量搜索查询失败 '{query}': {e}")
+                            print(f"批量搜索查询失败 '{query}': {e}")
                             results[query] = []
             else:
                 # 顺序批量搜索
@@ -248,7 +244,7 @@ class DualPathSearcher:
             return results
             
         except Exception as e:
-            logger.error(f"批量搜索失败: {e}")
+            print(f"批量搜索失败: {e}")
             return {query: [] for query in queries}
     
     def search_with_filters(self, query: str, filters: Dict[str, Any], 
@@ -274,7 +270,7 @@ class DualPathSearcher:
             return filtered_results
             
         except Exception as e:
-            logger.error(f"过滤搜索失败: {e}")
+            print(f"过滤搜索失败: {e}")
             return []
     
     def _apply_filters(self, results: List[str], filters: Dict[str, Any]) -> List[str]:
@@ -298,7 +294,7 @@ class DualPathSearcher:
             return filtered_results
             
         except Exception as e:
-            logger.error(f"应用过滤条件失败: {e}")
+            print(f"应用过滤条件失败: {e}")
             return results
     
     def _match_filters(self, result: str, filters: Dict[str, Any]) -> bool:
@@ -334,7 +330,7 @@ class DualPathSearcher:
             return True
             
         except Exception as e:
-            logger.error(f"过滤条件匹配失败: {e}")
+            print(f"过滤条件匹配失败: {e}")
             return True
     
     def _record_search_history(self, query: str, search_type: str, 
@@ -356,7 +352,7 @@ class DualPathSearcher:
                 self.search_history = self.search_history[-100:]
                 
         except Exception as e:
-            logger.error(f"记录搜索历史失败: {e}")
+            print(f"记录搜索历史失败: {e}")
     
     def get_search_statistics(self) -> Dict[str, Any]:
         """
@@ -387,15 +383,15 @@ class DualPathSearcher:
             }
             
         except Exception as e:
-            logger.error(f"获取搜索统计失败: {e}")
+            print(f"获取搜索统计失败: {e}")
             return {"error": str(e)}
     
     def clear_history(self):
         """清空搜索历史"""
         self.search_history.clear()
-        logger.info("搜索历史已清空")
+        print("搜索历史已清空")
     
     def close(self):
         """关闭搜索器"""
         self.clear_history()
-        logger.info("双路径搜索器已关闭")
+        print("双路径搜索器已关闭")

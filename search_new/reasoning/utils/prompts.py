@@ -5,10 +5,6 @@
 """
 
 from typing import Dict, Any, Optional
-import logging
-
-logger = logging.getLogger(__name__)
-
 
 class PromptTemplates:
     """提示模板管理类"""
@@ -16,7 +12,7 @@ class PromptTemplates:
     def __init__(self):
         """初始化提示模板"""
         self._templates = self._load_default_templates()
-        logger.info("提示模板初始化完成")
+        print("提示模板初始化完成")
     
     def _load_default_templates(self) -> Dict[str, str]:
         """加载默认提示模板"""
@@ -282,16 +278,16 @@ class PromptTemplates:
         """
         template = self.get_template(template_name)
         if template is None:
-            logger.warning(f"模板不存在: {template_name}")
+            print(f"模板不存在: {template_name}")
             return None
         
         try:
             return template.format(**kwargs)
         except KeyError as e:
-            logger.error(f"模板参数缺失: {e}")
+            print(f"模板参数缺失: {e}")
             return None
         except Exception as e:
-            logger.error(f"模板格式化失败: {e}")
+            print(f"模板格式化失败: {e}")
             return None
     
     def add_template(self, template_name: str, template_content: str):
@@ -303,7 +299,7 @@ class PromptTemplates:
             template_content: 模板内容
         """
         self._templates[template_name] = template_content
-        logger.info(f"添加提示模板: {template_name}")
+        print(f"添加提示模板: {template_name}")
     
     def update_template(self, template_name: str, template_content: str):
         """
@@ -315,9 +311,9 @@ class PromptTemplates:
         """
         if template_name in self._templates:
             self._templates[template_name] = template_content
-            logger.info(f"更新提示模板: {template_name}")
+            print(f"更新提示模板: {template_name}")
         else:
-            logger.warning(f"模板不存在，无法更新: {template_name}")
+            print(f"模板不存在，无法更新: {template_name}")
     
     def remove_template(self, template_name: str):
         """
@@ -328,9 +324,9 @@ class PromptTemplates:
         """
         if template_name in self._templates:
             del self._templates[template_name]
-            logger.info(f"删除提示模板: {template_name}")
+            print(f"删除提示模板: {template_name}")
         else:
-            logger.warning(f"模板不存在，无法删除: {template_name}")
+            print(f"模板不存在，无法删除: {template_name}")
     
     def list_templates(self) -> list:
         """

@@ -10,9 +10,6 @@ from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
 from collections import defaultdict, deque
 import statistics
-import logging
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -68,19 +65,19 @@ class PerformanceMonitor:
         # 监控开关
         self._monitoring_enabled = True
         
-        logger.info("性能监控器初始化完成")
+        print("性能监控器初始化完成")
     
     def enable_monitoring(self):
         """启用监控"""
         with self._lock:
             self._monitoring_enabled = True
-            logger.info("性能监控已启用")
+            print("性能监控已启用")
     
     def disable_monitoring(self):
         """禁用监控"""
         with self._lock:
             self._monitoring_enabled = False
-            logger.info("性能监控已禁用")
+            print("性能监控已禁用")
     
     def record_metric(self, name: str, value: float, metadata: Optional[Dict[str, Any]] = None):
         """
@@ -110,7 +107,7 @@ class PerformanceMonitor:
                 self._current_metrics[name] = value
                 
             except Exception as e:
-                logger.error(f"记录性能指标失败: {e}")
+                print(f"记录性能指标失败: {e}")
     
     def record_search_start(self, query: str, tool_name: str) -> str:
         """
@@ -188,7 +185,7 @@ class PerformanceMonitor:
                 )
                 
             except Exception as e:
-                logger.error(f"记录搜索结束失败: {e}")
+                print(f"记录搜索结束失败: {e}")
     
     def record_cache_hit(self, tool_name: str):
         """记录缓存命中"""
@@ -273,7 +270,7 @@ class PerformanceMonitor:
                     "stdev": statistics.stdev(values) if len(values) > 1 else 0.0
                 }
             except Exception as e:
-                logger.error(f"计算统计信息失败: {e}")
+                print(f"计算统计信息失败: {e}")
                 return {}
     
     def get_performance_report(self) -> Dict[str, Any]:
@@ -325,7 +322,7 @@ class PerformanceMonitor:
                 }
                 
             except Exception as e:
-                logger.error(f"生成性能报告失败: {e}")
+                print(f"生成性能报告失败: {e}")
                 return {"error": str(e)}
     
     def reset_statistics(self):
@@ -334,7 +331,7 @@ class PerformanceMonitor:
             self._search_stats = SearchStats()
             self._metrics_history.clear()
             self._current_metrics.clear()
-            logger.info("性能统计信息已重置")
+            print("性能统计信息已重置")
     
     def export_metrics(self, metric_names: Optional[List[str]] = None) -> Dict[str, List[Dict]]:
         """

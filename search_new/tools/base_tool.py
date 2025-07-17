@@ -7,19 +7,14 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Union
 import time
-import json
-import logging
 
 from langchain_core.tools import BaseTool
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
 
 from model.get_models import get_llm_model, get_embeddings_model
+from config.neo4jdb import get_db_manager
 from search_new.config import get_search_config
 from search_new.utils.cache_manager import CacheManager, MemoryCacheBackend, DiskCacheBackend
 from search_new.utils.vector_utils import VectorUtils
-
-logger = logging.getLogger(__name__)
 
 
 class BaseSearchTool(ABC):
@@ -45,7 +40,10 @@ class BaseSearchTool(ABC):
         # 初始化模型
         self.llm = llm or get_llm_model()
         self.embeddings = embeddings or get_embeddings_model()
-        
+
+        # 初始化数据库连接
+        self._setup_database()
+
         # 初始化缓存管理器
         if enable_cache:
             self._setup_cache(cache_dir)
@@ -71,8 +69,8 @@ class BaseSearchTool(ABC):
         
         # 设置处理链
         self._setup_chains()
-        
-        logger.info(f"{self.__class__.__name__} 初始化完成")
+
+        print(f"{self.__class__.__name__} 初始化完成")
     
     def _setup_cache(self, cache_dir: Optional[str] = None):
         """设置缓存管理器"""
@@ -105,9 +103,44 @@ class BaseSearchTool(ABC):
             )
             
         except Exception as e:
-            logger.error(f"缓存设置失败: {e}")
+            print(f"缓存设置失败: {e}")
             self.cache_manager = None
-    
+
+    def _setup_database(self):
+        """设置数据库连接"""
+        try:
+            # 使用项目统一的数据库管理器
+            db_manager = get_db_manager()
+            self.graph = db_manager.get_graph()
+            self.driver = db_manager.get_driver()
+
+        except Exception as e:
+            print(f"数据库连接设置失败: {e}")
+            self.graph = None
+            self.driver = None
+
+    def db_query(self, cypher: str, params: Dict[str, Any] = None):
+        """
+        执行Cypher查询
+
+        参数:
+            cypher: Cypher查询语句
+            params: 查询参数
+
+        返回:
+            查询结果
+        """
+        if params is None:
+            params = {}
+
+        try:
+            # 使用数据库管理器执行查询
+            return get_db_manager().execute_query(cypher, params)
+        except Exception as e:
+            print(f"数据库查询失败: {e}")
+            self.error_stats["query_errors"] += 1
+            return None
+
     @abstractmethod
     def _setup_chains(self):
         """
@@ -148,12 +181,12 @@ class BaseSearchTool(ABC):
             self.performance_metrics["cache_time"] += time.time() - start_time
             
             if result is not None:
-                logger.debug(f"缓存命中: {cache_key}")
-            
+                print(f"缓存命中: {cache_key}")
+
             return result
-            
+
         except Exception as e:
-            logger.error(f"缓存读取失败: {e}")
+            print(f"缓存读取失败: {e}")
             self.error_stats["cache_errors"] += 1
             return None
     
@@ -168,12 +201,12 @@ class BaseSearchTool(ABC):
             self.performance_metrics["cache_time"] += time.time() - start_time
             
             if success:
-                logger.debug(f"缓存设置成功: {cache_key}")
-            
+                print(f"缓存设置成功: {cache_key}")
+
             return success
-            
+
         except Exception as e:
-            logger.error(f"缓存设置失败: {e}")
+            print(f"缓存设置失败: {e}")
             self.error_stats["cache_errors"] += 1
             return False
     
@@ -206,7 +239,7 @@ class BaseSearchTool(ABC):
                 return str(response)
                 
         except Exception as e:
-            logger.error(f"LLM调用失败: {e}")
+            print(f"LLM调用失败: {e}")
             self.error_stats["llm_errors"] += 1
             raise
     
@@ -274,7 +307,7 @@ class BaseSearchTool(ABC):
             }
             
         except Exception as e:
-            logger.error(f"详细搜索失败: {e}")
+            print(f"详细搜索失败: {e}")
             return {
                 "result": f"搜索失败: {str(e)}",
                 "performance": self.get_performance_metrics(),
@@ -332,7 +365,7 @@ class BaseSearchTool(ABC):
             )
             
         except Exception as e:
-            logger.error(f"向量搜索失败: {e}")
+            print(f"向量搜索失败: {e}")
             return candidates[:top_k] if top_k else candidates
     
     def close(self):
@@ -343,7 +376,7 @@ class BaseSearchTool(ABC):
                 self.cache_manager.clear()
                 
         except Exception as e:
-            logger.error(f"资源关闭失败: {e}")
+            print(f"资源关闭失败: {e}")
     
     def __enter__(self):
         """上下文管理器入口"""

@@ -6,11 +6,7 @@ NLP工具模块
 
 import re
 import string
-from typing import List, Dict, Any, Optional, Tuple
-import logging
-
-logger = logging.getLogger(__name__)
-
+from typing import List, Dict
 
 def clean_text(text: str) -> str:
     """
@@ -35,7 +31,7 @@ def clean_text(text: str) -> str:
         return text
         
     except Exception as e:
-        logger.error(f"文本清理失败: {e}")
+        print(f"文本清理失败: {e}")
         return text
 
 
@@ -101,7 +97,7 @@ def extract_queries_from_text(text: str) -> List[str]:
         return cleaned_queries[:10]  # 限制数量
         
     except Exception as e:
-        logger.error(f"提取查询失败: {e}")
+        print(f"提取查询失败: {e}")
         return []
 
 
@@ -132,7 +128,7 @@ def split_sentences(text: str) -> List[str]:
         return cleaned_sentences
         
     except Exception as e:
-        logger.error(f"句子分割失败: {e}")
+        print(f"句子分割失败: {e}")
         return [text]
 
 
@@ -181,7 +177,7 @@ def is_query_like(text: str) -> bool:
         return False
         
     except Exception as e:
-        logger.error(f"查询判断失败: {e}")
+        print(f"查询判断失败: {e}")
         return False
 
 
@@ -231,7 +227,7 @@ def extract_keywords(text: str, max_keywords: int = 10) -> List[str]:
         return keywords
         
     except Exception as e:
-        logger.error(f"关键词提取失败: {e}")
+        print(f"关键词提取失败: {e}")
         return []
 
 
@@ -282,7 +278,7 @@ def extract_entities(text: str) -> Dict[str, List[str]]:
         return entities
         
     except Exception as e:
-        logger.error(f"实体提取失败: {e}")
+        print(f"实体提取失败: {e}")
         return {}
 
 
@@ -317,7 +313,7 @@ def calculate_text_similarity(text1: str, text2: str) -> float:
         return similarity
         
     except Exception as e:
-        logger.error(f"相似度计算失败: {e}")
+        print(f"相似度计算失败: {e}")
         return 0.0
 
 
@@ -360,7 +356,7 @@ def summarize_text(text: str, max_length: int = 200) -> str:
         return summary.strip()
         
     except Exception as e:
-        logger.error(f"文本摘要失败: {e}")
+        print(f"文本摘要失败: {e}")
         return text[:max_length] + "..."
 
 
@@ -393,5 +389,5 @@ def detect_language(text: str) -> str:
             return "unknown"
             
     except Exception as e:
-        logger.error(f"语言检测失败: {e}")
+        print(f"语言检测失败: {e}")
         return "unknown"

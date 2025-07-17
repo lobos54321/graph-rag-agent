@@ -6,10 +6,6 @@
 
 import numpy as np
 from typing import List, Dict, Any, Union, Optional, Tuple
-import logging
-
-logger = logging.getLogger(__name__)
-
 
 class VectorUtils:
     """向量搜索和相似度计算的统一工具类"""
@@ -36,7 +32,7 @@ class VectorUtils:
                 
             # 检查向量维度
             if vec1.shape != vec2.shape:
-                logger.warning(f"向量维度不匹配: {vec1.shape} vs {vec2.shape}")
+                print(f"向量维度不匹配: {vec1.shape} vs {vec2.shape}")
                 return 0.0
                 
             # 计算余弦相似度
@@ -54,7 +50,7 @@ class VectorUtils:
             return max(0.0, min(1.0, float(similarity)))
             
         except Exception as e:
-            logger.error(f"计算余弦相似度失败: {e}")
+            print(f"计算余弦相似度失败: {e}")
             return 0.0
     
     @staticmethod
@@ -77,13 +73,13 @@ class VectorUtils:
                 vec2 = np.array(vec2)
                 
             if vec1.shape != vec2.shape:
-                logger.warning(f"向量维度不匹配: {vec1.shape} vs {vec2.shape}")
+                print(f"向量维度不匹配: {vec1.shape} vs {vec2.shape}")
                 return float('inf')
                 
             return float(np.linalg.norm(vec1 - vec2))
             
         except Exception as e:
-            logger.error(f"计算欧几里得距离失败: {e}")
+            print(f"计算欧几里得距离失败: {e}")
             return float('inf')
     
     @staticmethod
@@ -106,13 +102,13 @@ class VectorUtils:
                 vec2 = np.array(vec2)
                 
             if vec1.shape != vec2.shape:
-                logger.warning(f"向量维度不匹配: {vec1.shape} vs {vec2.shape}")
+                print(f"向量维度不匹配: {vec1.shape} vs {vec2.shape}")
                 return float('inf')
                 
             return float(np.sum(np.abs(vec1 - vec2)))
             
         except Exception as e:
-            logger.error(f"计算曼哈顿距离失败: {e}")
+            print(f"计算曼哈顿距离失败: {e}")
             return float('inf')
     
     @staticmethod
@@ -156,7 +152,7 @@ class VectorUtils:
                     distance = VectorUtils.manhattan_distance(query_embedding, item[embedding_field])
                     score = 1.0 / (1.0 + distance) if distance != float('inf') else 0.0
                 else:
-                    logger.warning(f"未知的相似度度量方法: {similarity_metric}，使用余弦相似度")
+                    print(f"未知的相似度度量方法: {similarity_metric}，使用余弦相似度")
                     score = VectorUtils.cosine_similarity(query_embedding, item[embedding_field])
                 
                 # 复制item并添加分数
@@ -165,7 +161,7 @@ class VectorUtils:
                 scored_items.append(scored_item)
                 
             except Exception as e:
-                logger.error(f"计算相似度失败: {e}")
+                print(f"计算相似度失败: {e}")
                 continue
         
         # 按分数降序排序

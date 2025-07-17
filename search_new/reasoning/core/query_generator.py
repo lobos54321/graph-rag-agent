@@ -4,9 +4,7 @@
 生成子查询和跟进查询，支持多种查询策略
 """
 
-from typing import List, Dict, Any, Optional, Tuple
-import time
-import logging
+from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -14,8 +12,6 @@ from langchain_core.output_parsers import StrOutputParser
 
 from search_new.config import get_reasoning_config
 from search_new.reasoning.utils.nlp_utils import extract_queries_from_text, clean_text
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -62,7 +58,7 @@ class QueryGenerator:
         # 查询历史
         self.query_history: List[QueryContext] = []
         
-        logger.info("查询生成器初始化完成")
+        print("查询生成器初始化完成")
     
     def _get_default_sub_query_prompt(self) -> str:
         """获取默认子查询提示模板"""
@@ -135,7 +131,7 @@ class QueryGenerator:
             self.optimization_chain = optimization_template | self.llm | StrOutputParser()
             
         except Exception as e:
-            logger.error(f"处理链设置失败: {e}")
+            print(f"处理链设置失败: {e}")
             raise
     
     def generate_sub_queries(self, query_context: QueryContext) -> List[str]:
@@ -149,7 +145,7 @@ class QueryGenerator:
             List[str]: 子查询列表
         """
         try:
-            logger.info(f"生成子查询: {query_context.original_query[:50]}...")
+            print(f"生成子查询: {query_context.original_query[:50]}...")
             
             # 调用子查询生成链
             result = self.sub_query_chain.invoke({
@@ -168,11 +164,11 @@ class QueryGenerator:
             )
             self.query_history.append(context)
             
-            logger.info(f"生成了 {len(queries)} 个子查询")
+            print(f"生成了 {len(queries)} 个子查询")
             return queries
             
         except Exception as e:
-            logger.error(f"生成子查询失败: {e}")
+            print(f"生成子查询失败: {e}")
             return []
     
     def generate_followup_queries(self, query_context: QueryContext) -> List[str]:
@@ -186,7 +182,7 @@ class QueryGenerator:
             List[str]: 跟进查询列表
         """
         try:
-            logger.info(f"生成跟进查询: {query_context.original_query[:50]}...")
+            print(f"生成跟进查询: {query_context.original_query[:50]}...")
             
             # 准备之前的结果
             previous_results_text = "\n".join(query_context.previous_results)
@@ -210,11 +206,11 @@ class QueryGenerator:
             )
             self.query_history.append(context)
             
-            logger.info(f"生成了 {len(queries)} 个跟进查询")
+            print(f"生成了 {len(queries)} 个跟进查询")
             return queries
             
         except Exception as e:
-            logger.error(f"生成跟进查询失败: {e}")
+            print(f"生成跟进查询失败: {e}")
             return []
     
     def optimize_query(self, query: str, optimization_goal: str = "precision", 
@@ -231,7 +227,7 @@ class QueryGenerator:
             str: 优化后的查询
         """
         try:
-            logger.info(f"优化查询: {query[:50]}...")
+            print(f"优化查询: {query[:50]}...")
             
             # 调用优化链
             result = self.optimization_chain.invoke({
@@ -244,14 +240,14 @@ class QueryGenerator:
             optimized_query = clean_text(result)
             
             if optimized_query and len(optimized_query) > 3:
-                logger.info("查询优化成功")
+                print("查询优化成功")
                 return optimized_query
             else:
-                logger.warning("查询优化结果无效，返回原查询")
+                print("查询优化结果无效，返回原查询")
                 return query
                 
         except Exception as e:
-            logger.error(f"查询优化失败: {e}")
+            print(f"查询优化失败: {e}")
             return query
     
     def generate_clarification_queries(self, query: str, ambiguous_terms: List[str]) -> List[str]:
@@ -277,11 +273,11 @@ class QueryGenerator:
                 context_query = f"在'{query}'的上下文中，{term}指的是什么？"
                 clarification_queries.append(context_query)
             
-            logger.info(f"生成了 {len(clarification_queries)} 个澄清查询")
+            print(f"生成了 {len(clarification_queries)} 个澄清查询")
             return clarification_queries
             
         except Exception as e:
-            logger.error(f"生成澄清查询失败: {e}")
+            print(f"生成澄清查询失败: {e}")
             return []
     
     def _extract_queries_from_result(self, result: str) -> List[str]:
@@ -308,7 +304,7 @@ class QueryGenerator:
             return cleaned_queries
             
         except Exception as e:
-            logger.error(f"提取查询失败: {e}")
+            print(f"提取查询失败: {e}")
             return []
     
     def get_query_suggestions(self, partial_query: str, context: str = "") -> List[str]:
@@ -347,11 +343,11 @@ class QueryGenerator:
             
             suggestions = self._extract_queries_from_result(result)
             
-            logger.info(f"生成了 {len(suggestions)} 个查询建议")
+            print(f"生成了 {len(suggestions)} 个查询建议")
             return suggestions
             
         except Exception as e:
-            logger.error(f"获取查询建议失败: {e}")
+            print(f"获取查询建议失败: {e}")
             return []
     
     def get_query_history(self) -> List[Dict[str, Any]]:
@@ -374,9 +370,9 @@ class QueryGenerator:
     def clear_history(self):
         """清空查询历史"""
         self.query_history.clear()
-        logger.info("查询历史已清空")
+        print("查询历史已清空")
     
     def close(self):
         """关闭查询生成器"""
         self.clear_history()
-        logger.info("查询生成器已关闭")
+        print("查询生成器已关闭")

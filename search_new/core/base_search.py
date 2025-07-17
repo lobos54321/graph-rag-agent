@@ -5,17 +5,13 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 import time
-import logging
 
 from model.get_models import get_llm_model, get_embeddings_model
 from config.neo4jdb import get_db_manager
 from search_new.config import get_search_config
 from search_new.utils.cache_manager import CacheManager, MemoryCacheBackend, DiskCacheBackend
-
-logger = logging.getLogger(__name__)
-
 
 class BaseSearch(ABC):
     """
@@ -84,7 +80,7 @@ class BaseSearch(ABC):
             self.driver = self.db_manager.get_driver()
             
         except Exception as e:
-            logger.error(f"数据库连接设置失败: {e}")
+            print(f"数据库连接设置失败: {e}")
             raise
     
     def _setup_cache(self, cache_dir: Optional[str] = None):
@@ -119,7 +115,7 @@ class BaseSearch(ABC):
             )
             
         except Exception as e:
-            logger.error(f"缓存设置失败: {e}")
+            print(f"缓存设置失败: {e}")
             self.cache_manager = None
     
     def _get_cache_key(self, query: str, **kwargs) -> str:
@@ -154,12 +150,12 @@ class BaseSearch(ABC):
             self.performance_metrics["cache_time"] += time.time() - start_time
             
             if result is not None:
-                logger.debug(f"缓存命中: {cache_key}")
+                print(f"缓存命中: {cache_key}")
             
             return result
             
         except Exception as e:
-            logger.error(f"缓存读取失败: {e}")
+            print(f"缓存读取失败: {e}")
             self.error_stats["cache_errors"] += 1
             return None
     
@@ -174,12 +170,12 @@ class BaseSearch(ABC):
             self.performance_metrics["cache_time"] += time.time() - start_time
             
             if success:
-                logger.debug(f"缓存设置成功: {cache_key}")
+                print(f"缓存设置成功: {cache_key}")
             
             return success
             
         except Exception as e:
-            logger.error(f"缓存设置失败: {e}")
+            print(f"缓存设置失败: {e}")
             self.error_stats["cache_errors"] += 1
             return False
     
@@ -202,7 +198,7 @@ class BaseSearch(ABC):
             return result
             
         except Exception as e:
-            logger.error(f"数据库查询失败: {e}")
+            print(f"数据库查询失败: {e}")
             self.error_stats["db_errors"] += 1
             raise
     
@@ -229,7 +225,7 @@ class BaseSearch(ABC):
                 return str(response)
                 
         except Exception as e:
-            logger.error(f"LLM调用失败: {e}")
+            print(f"LLM调用失败: {e}")
             self.error_stats["llm_errors"] += 1
             raise
     
@@ -272,7 +268,7 @@ class BaseSearch(ABC):
                 self.graph.close()
                 
         except Exception as e:
-            logger.error(f"资源关闭失败: {e}")
+            print(f"资源关闭失败: {e}")
     
     def __enter__(self):
         """上下文管理器入口"""

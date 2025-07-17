@@ -4,10 +4,9 @@
 在深度研究基础上添加社区感知和知识图谱功能
 """
 
-from typing import Dict, List, Any, Optional, Union, AsyncGenerator
+from typing import Dict, List, Any, Union, AsyncGenerator
 import time
 import asyncio
-import logging
 
 from langchain_core.tools import BaseTool
 
@@ -17,8 +16,6 @@ from search_new.reasoning import (
     ComplexityEstimator,
     KnowledgeGraphBuilder
 )
-
-logger = logging.getLogger(__name__)
 
 
 class DeeperResearchTool(DeepResearchTool):
@@ -55,7 +52,7 @@ class DeeperResearchTool(DeepResearchTool):
         self._community_cache = {}
         self._kg_cache = {}
         
-        logger.info("增强深度研究工具初始化完成")
+        print("增强深度研究工具初始化完成")
     
     def _graph_query(self, cypher: str, params: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """图数据库查询函数"""
@@ -64,7 +61,7 @@ class DeeperResearchTool(DeepResearchTool):
             # 为了演示，返回模拟结果
             return []
         except Exception as e:
-            logger.error(f"图查询失败: {e}")
+            print(f"图查询失败: {e}")
             return []
     
     def search(self, query_input: Union[str, Dict[str, Any]]) -> str:
@@ -93,10 +90,10 @@ class DeeperResearchTool(DeepResearchTool):
             # 检查缓存
             cached_result = self._get_from_cache(cache_key)
             if cached_result:
-                logger.info(f"增强深度研究缓存命中: {query[:50]}...")
+                print(f"增强深度研究缓存命中: {query[:50]}...")
                 return cached_result
             
-            logger.info(f"开始增强深度研究: {query[:100]}...")
+            print(f"开始增强深度研究: {query[:100]}...")
             
             # 评估查询复杂度
             complexity = self.complexity_estimator.estimate_complexity(query)
@@ -115,11 +112,11 @@ class DeeperResearchTool(DeepResearchTool):
             # 记录性能指标
             self.performance_metrics["total_time"] = time.time() - overall_start
             
-            logger.info(f"增强深度研究完成，耗时: {self.performance_metrics['total_time']:.2f}s")
+            print(f"增强深度研究完成，耗时: {self.performance_metrics['total_time']:.2f}s")
             return result
             
         except Exception as e:
-            logger.error(f"增强深度研究失败: {e}")
+            print(f"增强深度研究失败: {e}")
             self.error_stats["query_errors"] += 1
             self.performance_metrics["total_time"] = time.time() - overall_start
             
@@ -165,7 +162,7 @@ class DeeperResearchTool(DeepResearchTool):
             return enhanced_result
             
         except Exception as e:
-            logger.error(f"增强研究执行失败: {e}")
+            print(f"增强研究执行失败: {e}")
             # 降级到基础深度研究
             return super()._execute_deep_research(query)
     
@@ -193,7 +190,7 @@ class DeeperResearchTool(DeepResearchTool):
             return community_context
             
         except Exception as e:
-            logger.error(f"社区感知增强失败: {e}")
+            print(f"社区感知增强失败: {e}")
             return {"search_strategy": {}, "enhanced_keywords": keywords}
     
     def _build_dynamic_knowledge_graph(self, query: str) -> str:
@@ -220,7 +217,7 @@ class DeeperResearchTool(DeepResearchTool):
             return kg_graph_id
             
         except Exception as e:
-            logger.error(f"知识图谱构建失败: {e}")
+            print(f"知识图谱构建失败: {e}")
             return ""
     
     def _execute_chain_exploration(self, query: str, keywords: Dict[str, List[str]]) -> str:
@@ -250,7 +247,7 @@ class DeeperResearchTool(DeepResearchTool):
             return exploration_path_id
             
         except Exception as e:
-            logger.error(f"链式探索失败: {e}")
+            print(f"链式探索失败: {e}")
             return ""
     
     def _enhance_final_answer(self, query: str, base_result: str, complexity) -> str:
@@ -290,7 +287,7 @@ class DeeperResearchTool(DeepResearchTool):
             return enhanced_result if enhanced_result else base_result
             
         except Exception as e:
-            logger.error(f"答案增强失败: {e}")
+            print(f"答案增强失败: {e}")
             return base_result
     
     async def search_stream(self, query: str) -> AsyncGenerator[str, None]:
@@ -410,4 +407,4 @@ class DeeperResearchTool(DeepResearchTool):
             self._kg_cache.clear()
                 
         except Exception as e:
-            logger.error(f"增强深度研究工具关闭失败: {e}")
+            print(f"增强深度研究工具关闭失败: {e}")

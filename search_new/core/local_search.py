@@ -4,9 +4,8 @@
 基于向量检索的社区内精确查询
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import time
-import logging
 
 from langchain_community.vectorstores import Neo4jVector
 from langchain_core.prompts import ChatPromptTemplate
@@ -14,8 +13,6 @@ from langchain_core.output_parsers import StrOutputParser
 
 from config.prompt import LC_SYSTEM_PROMPT
 from search_new.core.base_search import BaseSearch
-
-logger = logging.getLogger(__name__)
 
 
 class LocalSearch(BaseSearch):
@@ -71,7 +68,7 @@ class LocalSearch(BaseSearch):
         self.neo4j_username = self.db_manager.neo4j_username
         self.neo4j_password = self.db_manager.neo4j_password
         
-        logger.info(f"本地搜索初始化完成，配置: top_entities={self.top_entities}")
+        print(f"本地搜索初始化完成，配置: top_entities={self.top_entities}")
     
     def _build_final_query(self) -> str:
         """构建最终的检索查询"""
@@ -97,7 +94,7 @@ class LocalSearch(BaseSearch):
             return vector_store
             
         except Exception as e:
-            logger.error(f"创建向量存储失败: {e}")
+            print(f"创建向量存储失败: {e}")
             raise
     
     def as_retriever(self, **kwargs):
@@ -115,7 +112,7 @@ class LocalSearch(BaseSearch):
             )
             
         except Exception as e:
-            logger.error(f"创建检索器失败: {e}")
+            print(f"创建检索器失败: {e}")
             raise
     
     def _similarity_search(self, query: str) -> list:
@@ -145,7 +142,7 @@ class LocalSearch(BaseSearch):
             return docs
             
         except Exception as e:
-            logger.error(f"相似度搜索失败: {e}")
+            print(f"相似度搜索失败: {e}")
             raise
     
     def _generate_response(self, query: str, context: str) -> str:
@@ -193,7 +190,7 @@ class LocalSearch(BaseSearch):
             return response
             
         except Exception as e:
-            logger.error(f"响应生成失败: {e}")
+            print(f"响应生成失败: {e}")
             raise
     
     def search(self, query: str, **kwargs) -> str:
@@ -217,10 +214,10 @@ class LocalSearch(BaseSearch):
             # 检查缓存
             cached_result = self._get_from_cache(cache_key)
             if cached_result is not None:
-                logger.info(f"本地搜索缓存命中: {query[:50]}...")
+                print(f"本地搜索缓存命中: {query[:50]}...")
                 return cached_result
             
-            logger.info(f"开始本地搜索: {query[:100]}...")
+            print(f"开始本地搜索: {query[:100]}...")
             
             # 执行相似度搜索
             search_start = time.time()
@@ -231,9 +228,9 @@ class LocalSearch(BaseSearch):
             context = ""
             if docs:
                 context = docs[0].page_content
-                logger.debug(f"检索到 {len(docs)} 个文档，上下文长度: {len(context)}")
+                print(f"检索到 {len(docs)} 个文档，上下文长度: {len(context)}")
             else:
-                logger.warning("未检索到相关文档")
+                print("未检索到相关文档")
                 context = "未找到相关信息"
             
             # 生成响应
@@ -248,12 +245,12 @@ class LocalSearch(BaseSearch):
             # 记录总时间
             self.performance_metrics["total_time"] = time.time() - overall_start
             
-            logger.info(f"本地搜索完成，耗时: {self.performance_metrics['total_time']:.2f}s")
+            print(f"本地搜索完成，耗时: {self.performance_metrics['total_time']:.2f}s")
             
             return response
             
         except Exception as e:
-            logger.error(f"本地搜索失败: {e}")
+            print(f"本地搜索失败: {e}")
             self.error_stats["query_errors"] += 1
             self.performance_metrics["total_time"] = time.time() - overall_start
             
@@ -298,7 +295,7 @@ class LocalSearch(BaseSearch):
             }
             
         except Exception as e:
-            logger.error(f"详细搜索失败: {e}")
+            print(f"详细搜索失败: {e}")
             return {
                 "result": f"搜索失败: {str(e)}",
                 "documents": [],

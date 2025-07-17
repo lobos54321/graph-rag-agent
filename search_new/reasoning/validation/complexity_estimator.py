@@ -4,18 +4,13 @@
 评估查询和推理任务的复杂度，指导搜索策略选择
 """
 
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Optional
 import re
-import time
-import logging
 from dataclasses import dataclass, field
 from enum import Enum
 
 from search_new.config import get_reasoning_config
 from search_new.reasoning.utils.nlp_utils import extract_keywords, extract_entities
-
-logger = logging.getLogger(__name__)
-
 
 class ComplexityLevel(Enum):
     """复杂度级别枚举"""
@@ -67,7 +62,7 @@ class ComplexityEstimator:
         # 复杂度关键词
         self._setup_complexity_patterns()
         
-        logger.info("复杂度评估器初始化完成")
+        print("复杂度评估器初始化完成")
     
     def _setup_complexity_patterns(self):
         """设置复杂度模式"""
@@ -110,7 +105,7 @@ class ComplexityEstimator:
             ComplexityMetrics: 复杂度指标
         """
         try:
-            logger.debug(f"评估查询复杂度: {query[:50]}...")
+            print(f"评估查询复杂度: {query[:50]}...")
             
             # 计算各项复杂度指标
             lexical_complexity = self._calculate_lexical_complexity(query)
@@ -152,7 +147,7 @@ class ComplexityEstimator:
             )
             
         except Exception as e:
-            logger.error(f"复杂度评估失败: {e}")
+            print(f"复杂度评估失败: {e}")
             return ComplexityMetrics()
     
     def _calculate_lexical_complexity(self, query: str) -> float:
@@ -182,7 +177,7 @@ class ComplexityEstimator:
             return min(score, 1.0)
             
         except Exception as e:
-            logger.error(f"词汇复杂度计算失败: {e}")
+            print(f"词汇复杂度计算失败: {e}")
             return 0.5
     
     def _calculate_semantic_complexity(self, query: str, context: Optional[str] = None) -> float:
@@ -213,7 +208,7 @@ class ComplexityEstimator:
             return min(score, 1.0)
             
         except Exception as e:
-            logger.error(f"语义复杂度计算失败: {e}")
+            print(f"语义复杂度计算失败: {e}")
             return 0.5
     
     def _calculate_structural_complexity(self, query: str) -> float:
@@ -243,7 +238,7 @@ class ComplexityEstimator:
             return min(score, 1.0)
             
         except Exception as e:
-            logger.error(f"结构复杂度计算失败: {e}")
+            print(f"结构复杂度计算失败: {e}")
             return 0.5
     
     def _calculate_reasoning_complexity(self, query: str) -> float:
@@ -274,7 +269,7 @@ class ComplexityEstimator:
             return min(score, 1.0)
             
         except Exception as e:
-            logger.error(f"推理复杂度计算失败: {e}")
+            print(f"推理复杂度计算失败: {e}")
             return 0.5
     
     def _determine_complexity_level(self, overall_complexity: float) -> ComplexityLevel:
@@ -318,7 +313,7 @@ class ComplexityEstimator:
             return factors
             
         except Exception as e:
-            logger.error(f"复杂度因素识别失败: {e}")
+            print(f"复杂度因素识别失败: {e}")
             return ["因素识别失败"]
     
     def _generate_recommendations(self, complexity_level: ComplexityLevel, 
@@ -358,7 +353,7 @@ class ComplexityEstimator:
             return recommendations
             
         except Exception as e:
-            logger.error(f"建议生成失败: {e}")
+            print(f"建议生成失败: {e}")
             return ["建议生成失败"]
     
     def batch_estimate_complexity(self, queries: List[str]) -> Dict[str, ComplexityMetrics]:
@@ -380,7 +375,7 @@ class ComplexityEstimator:
             return results
             
         except Exception as e:
-            logger.error(f"批量复杂度评估失败: {e}")
+            print(f"批量复杂度评估失败: {e}")
             return {}
     
     def get_complexity_distribution(self, queries: List[str]) -> Dict[str, int]:
@@ -403,9 +398,9 @@ class ComplexityEstimator:
             return distribution
             
         except Exception as e:
-            logger.error(f"复杂度分布计算失败: {e}")
+            print(f"复杂度分布计算失败: {e}")
             return {}
     
     def close(self):
         """关闭复杂度评估器"""
-        logger.info("复杂度评估器已关闭")
+        print("复杂度评估器已关闭")

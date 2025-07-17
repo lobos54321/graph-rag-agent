@@ -5,16 +5,12 @@
 """
 
 import os
-import json
 import time
 import hashlib
 import pickle
-from typing import Any, Optional, Dict, List
+from typing import Any, Optional, Dict
 from abc import ABC, abstractmethod
 import threading
-import logging
-
-logger = logging.getLogger(__name__)
 
 
 class CacheBackend(ABC):
@@ -113,7 +109,7 @@ class MemoryCacheBackend(CacheBackend):
                 return True
                 
             except Exception as e:
-                logger.error(f"设置内存缓存失败: {e}")
+                print(f"设置内存缓存失败: {e}")
                 return False
     
     def delete(self, key: str) -> bool:
@@ -184,7 +180,7 @@ class DiskCacheBackend(CacheBackend):
                 return data['value']
                 
             except Exception as e:
-                logger.error(f"读取磁盘缓存失败: {e}")
+                print(f"读取磁盘缓存失败: {e}")
                 # 删除损坏的缓存文件
                 if os.path.exists(file_path):
                     try:
@@ -211,7 +207,7 @@ class DiskCacheBackend(CacheBackend):
                 return True
                 
             except Exception as e:
-                logger.error(f"写入磁盘缓存失败: {e}")
+                print(f"写入磁盘缓存失败: {e}")
                 return False
     
     def delete(self, key: str) -> bool:
@@ -226,7 +222,7 @@ class DiskCacheBackend(CacheBackend):
                 return False
                 
             except Exception as e:
-                logger.error(f"删除磁盘缓存失败: {e}")
+                print(f"删除磁盘缓存失败: {e}")
                 return False
     
     def clear(self) -> bool:
@@ -240,7 +236,7 @@ class DiskCacheBackend(CacheBackend):
                 return True
                 
             except Exception as e:
-                logger.error(f"清空磁盘缓存失败: {e}")
+                print(f"清空磁盘缓存失败: {e}")
                 return False
     
     def exists(self, key: str) -> bool:

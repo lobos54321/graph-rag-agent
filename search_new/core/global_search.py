@@ -6,7 +6,6 @@
 
 from typing import List, Dict, Any, Optional
 import time
-import logging
 from tqdm import tqdm
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -14,8 +13,6 @@ from langchain_core.output_parsers import StrOutputParser
 
 from config.prompt import MAP_SYSTEM_PROMPT, REDUCE_SYSTEM_PROMPT
 from search_new.core.base_search import BaseSearch
-
-logger = logging.getLogger(__name__)
 
 
 class GlobalSearch(BaseSearch):
@@ -56,7 +53,7 @@ class GlobalSearch(BaseSearch):
         self.batch_size = self.global_config.batch_size
         self.max_communities = self.global_config.max_communities
         
-        logger.info(f"全局搜索初始化完成，默认层级: {self.default_level}")
+        print(f"全局搜索初始化完成，默认层级: {self.default_level}")
     
     def _get_community_data(self, level: int) -> List[Dict]:
         """
@@ -96,11 +93,11 @@ class GlobalSearch(BaseSearch):
                 else:
                     communities = result if isinstance(result, list) else []
             
-            logger.info(f"获取到 {len(communities)} 个层级 {level} 的社区")
+            print(f"获取到 {len(communities)} 个层级 {level} 的社区")
             return communities
             
         except Exception as e:
-            logger.error(f"获取社区数据失败: {e}")
+            print(f"获取社区数据失败: {e}")
             return []
     
     def _process_single_community(self, query: str, community: Dict) -> str:
@@ -148,7 +145,7 @@ class GlobalSearch(BaseSearch):
             return intermediate_result.strip()
             
         except Exception as e:
-            logger.error(f"处理社区数据失败: {e}")
+            print(f"处理社区数据失败: {e}")
             return "处理失败"
     
     def _process_communities(self, query: str, communities: List[Dict]) -> List[str]:
@@ -163,7 +160,7 @@ class GlobalSearch(BaseSearch):
             List[str]: 中间结果列表
         """
         if not communities:
-            logger.warning("没有社区数据需要处理")
+            print("没有社区数据需要处理")
             return []
         
         intermediate_results = []
@@ -178,10 +175,10 @@ class GlobalSearch(BaseSearch):
                     intermediate_results.append(result)
                     
             except Exception as e:
-                logger.error(f"处理社区失败: {e}")
+                print(f"处理社区失败: {e}")
                 continue
         
-        logger.info(f"成功处理 {len(intermediate_results)} 个社区的数据")
+        print(f"成功处理 {len(intermediate_results)} 个社区的数据")
         return intermediate_results
     
     def _reduce_results(self, query: str, intermediate_results: List[str]) -> str:
@@ -236,7 +233,7 @@ class GlobalSearch(BaseSearch):
             return final_answer
             
         except Exception as e:
-            logger.error(f"结果整合失败: {e}")
+            print(f"结果整合失败: {e}")
             return f"结果整合过程中出现问题: {str(e)}"
     
     def search(self, query: str, level: Optional[int] = None, **kwargs) -> str:
@@ -265,10 +262,10 @@ class GlobalSearch(BaseSearch):
             # 检查缓存
             cached_result = self._get_from_cache(cache_key)
             if cached_result is not None:
-                logger.info(f"全局搜索缓存命中: {query[:50]}...")
+                print(f"全局搜索缓存命中: {query[:50]}...")
                 return cached_result
             
-            logger.info(f"开始全局搜索: {query[:100]}..., 层级: {level}")
+            print(f"开始全局搜索: {query[:100]}..., 层级: {level}")
             
             # 获取社区数据
             communities = self._get_community_data(level)
@@ -289,12 +286,12 @@ class GlobalSearch(BaseSearch):
             # 记录总时间
             self.performance_metrics["total_time"] = time.time() - overall_start
             
-            logger.info(f"全局搜索完成，耗时: {self.performance_metrics['total_time']:.2f}s")
+            print(f"全局搜索完成，耗时: {self.performance_metrics['total_time']:.2f}s")
             
             return final_answer
             
         except Exception as e:
-            logger.error(f"全局搜索失败: {e}")
+            print(f"全局搜索失败: {e}")
             self.error_stats["query_errors"] += 1
             self.performance_metrics["total_time"] = time.time() - overall_start
             
@@ -339,7 +336,7 @@ class GlobalSearch(BaseSearch):
             }
             
         except Exception as e:
-            logger.error(f"详细搜索失败: {e}")
+            print(f"详细搜索失败: {e}")
             return {
                 "result": f"搜索失败: {str(e)}",
                 "communities_count": 0,

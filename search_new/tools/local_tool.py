@@ -7,8 +7,6 @@
 from typing import List, Dict, Any, Union, Optional
 import time
 import json
-import logging
-
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
@@ -19,8 +17,6 @@ from config.prompt import LC_SYSTEM_PROMPT, contextualize_q_system_prompt
 from config.settings import lc_description
 from search_new.tools.base_tool import BaseSearchTool
 from search_new.core.local_search import LocalSearch
-
-logger = logging.getLogger(__name__)
 
 
 class LocalSearchTool(BaseSearchTool):
@@ -37,7 +33,7 @@ class LocalSearchTool(BaseSearchTool):
         self.local_searcher = LocalSearch(self.llm, self.embeddings)
         self.retriever = self.local_searcher.as_retriever()
         
-        logger.info("本地搜索工具初始化完成")
+        print("本地搜索工具初始化完成")
     
     def _setup_chains(self):
         """设置处理链"""
@@ -49,7 +45,7 @@ class LocalSearchTool(BaseSearchTool):
             self._setup_rag_chain()
             
         except Exception as e:
-            logger.error(f"处理链设置失败: {e}")
+            print(f"处理链设置失败: {e}")
             raise
     
     def _setup_keyword_chain(self):
@@ -109,7 +105,7 @@ class LocalSearchTool(BaseSearchTool):
             )
             
         except Exception as e:
-            logger.error(f"RAG链设置失败: {e}")
+            print(f"RAG链设置失败: {e}")
             raise
     
     def extract_keywords(self, query: str) -> Dict[str, List[str]]:
@@ -141,7 +137,7 @@ class LocalSearchTool(BaseSearchTool):
             try:
                 keywords = json.loads(result)
             except json.JSONDecodeError:
-                logger.warning(f"关键词提取结果解析失败: {result}")
+                print(f"关键词提取结果解析失败: {result}")
                 keywords = {"low_level": [], "high_level": []}
             
             # 确保包含必要的键
@@ -158,7 +154,7 @@ class LocalSearchTool(BaseSearchTool):
             return keywords
             
         except Exception as e:
-            logger.error(f"关键词提取失败: {e}")
+            print(f"关键词提取失败: {e}")
             self.error_stats["keyword_errors"] += 1
             return {"low_level": [], "high_level": []}
     
@@ -204,10 +200,10 @@ class LocalSearchTool(BaseSearchTool):
             # 检查缓存
             cached_result = self._get_from_cache(cache_key)
             if cached_result:
-                logger.info(f"本地搜索缓存命中: {query[:50]}...")
+                print(f"本地搜索缓存命中: {query[:50]}...")
                 return cached_result
-            
-            logger.info(f"开始本地搜索: {query[:100]}...")
+
+            print(f"开始本地搜索: {query[:100]}...")
             
             # 使用RAG链执行搜索
             search_start = time.time()
@@ -236,14 +232,14 @@ class LocalSearchTool(BaseSearchTool):
             if not result or result.strip() == "":
                 return "未找到相关信息"
             
-            logger.info(f"本地搜索完成，耗时: {self.performance_metrics['total_time']:.2f}s")
+            print(f"本地搜索完成，耗时: {self.performance_metrics['total_time']:.2f}s")
             return result
-            
+
         except Exception as e:
-            logger.error(f"本地搜索失败: {e}")
+            print(f"本地搜索失败: {e}")
             self.error_stats["query_errors"] += 1
             self.performance_metrics["total_time"] = time.time() - overall_start
-            
+
             return f"搜索过程中出现问题: {str(e)}"
     
     def search_with_details(self, query_input: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
@@ -290,7 +286,7 @@ class LocalSearchTool(BaseSearchTool):
             }
             
         except Exception as e:
-            logger.error(f"详细本地搜索失败: {e}")
+            print(f"详细本地搜索失败: {e}")
             return {
                 "result": f"搜索失败: {str(e)}",
                 "query": str(query_input),
@@ -317,7 +313,7 @@ class LocalSearchTool(BaseSearchTool):
     def clear_chat_history(self):
         """清空聊天历史"""
         self.chat_history = []
-        logger.info("聊天历史已清空")
+        print("聊天历史已清空")
     
     def get_chat_history(self) -> List[Dict]:
         """获取聊天历史"""
@@ -334,4 +330,4 @@ class LocalSearchTool(BaseSearchTool):
                 self.local_searcher.close()
                 
         except Exception as e:
-            logger.error(f"本地搜索工具关闭失败: {e}")
+            print(f"本地搜索工具关闭失败: {e}")

@@ -4,10 +4,8 @@
 支持多轮推理和搜索的高级搜索工具
 """
 
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Union
 import time
-import logging
-import traceback
 
 from langchain_core.tools import BaseTool
 
@@ -22,8 +20,6 @@ from search_new.reasoning import (
     DualPathSearcher,
     AnswerValidator
 )
-
-logger = logging.getLogger(__name__)
 
 
 class DeepResearchTool(BaseSearchTool):
@@ -69,7 +65,7 @@ class DeepResearchTool(BaseSearchTool):
         self.all_retrieved_info = []
         self.current_query_context = {}
         
-        logger.info("深度研究工具初始化完成")
+        print("深度研究工具初始化完成")
     
     def _setup_chains(self):
         """设置处理链"""
@@ -82,7 +78,7 @@ class DeepResearchTool(BaseSearchTool):
             result = self.local_tool.search(query)
             return [result] if result else []
         except Exception as e:
-            logger.error(f"知识库检索失败: {e}")
+            print(f"知识库检索失败: {e}")
             return []
     
     def _kg_retrieve(self, query: str) -> List[str]:
@@ -91,13 +87,13 @@ class DeepResearchTool(BaseSearchTool):
             result = self.global_tool.search(query)
             return [result] if result else []
         except Exception as e:
-            logger.error(f"知识图谱检索失败: {e}")
+            print(f"知识图谱检索失败: {e}")
             return []
     
     def _log(self, message: str):
         """记录执行日志"""
         self.execution_logs.append(message)
-        logger.debug(message)
+        print(message)
     
     def extract_keywords(self, query: str) -> Dict[str, List[str]]:
         """
@@ -112,7 +108,7 @@ class DeepResearchTool(BaseSearchTool):
         try:
             return self.hybrid_tool.extract_keywords(query)
         except Exception as e:
-            logger.error(f"关键词提取失败: {e}")
+            print(f"关键词提取失败: {e}")
             return {"low_level": [], "high_level": []}
     
     def search(self, query_input: Union[str, Dict[str, Any]]) -> str:
@@ -141,10 +137,10 @@ class DeepResearchTool(BaseSearchTool):
             # 检查缓存
             cached_result = self._get_from_cache(cache_key)
             if cached_result:
-                logger.info(f"深度研究缓存命中: {query[:50]}...")
+                print(f"深度研究缓存命中: {query[:50]}...")
                 return cached_result
             
-            logger.info(f"开始深度研究: {query[:100]}...")
+            print(f"开始深度研究: {query[:100]}...")
             
             # 执行深度研究流程
             result = self._execute_deep_research(query)
@@ -155,11 +151,11 @@ class DeepResearchTool(BaseSearchTool):
             # 记录性能指标
             self.performance_metrics["total_time"] = time.time() - overall_start
             
-            logger.info(f"深度研究完成，耗时: {self.performance_metrics['total_time']:.2f}s")
+            print(f"深度研究完成，耗时: {self.performance_metrics['total_time']:.2f}s")
             return result
             
         except Exception as e:
-            logger.error(f"深度研究失败: {e}")
+            print(f"深度研究失败: {e}")
             self.error_stats["query_errors"] += 1
             self.performance_metrics["total_time"] = time.time() - overall_start
             
@@ -254,7 +250,7 @@ class DeepResearchTool(BaseSearchTool):
             return final_answer
             
         except Exception as e:
-            logger.error(f"深度研究执行失败: {e}")
+            print(f"深度研究执行失败: {e}")
             return f"深度研究过程中出现错误: {str(e)}"
     
     def _execute_sub_query(self, sub_query: str) -> List[str]:
@@ -276,7 +272,7 @@ class DeepResearchTool(BaseSearchTool):
             return results
             
         except Exception as e:
-            logger.error(f"子查询执行失败: {e}")
+            print(f"子查询执行失败: {e}")
             return []
     
     def _generate_final_answer(self, query: str, think_content: str) -> str:
@@ -307,7 +303,7 @@ class DeepResearchTool(BaseSearchTool):
             return final_answer
             
         except Exception as e:
-            logger.error(f"最终答案生成失败: {e}")
+            print(f"最终答案生成失败: {e}")
             return "抱歉，无法生成满意的答案。"
     
     def thinking(self, query: str) -> Dict[str, Any]:
@@ -345,7 +341,7 @@ class DeepResearchTool(BaseSearchTool):
             }
             
         except Exception as e:
-            logger.error(f"思考过程执行失败: {e}")
+            print(f"思考过程执行失败: {e}")
             return {
                 "query": query,
                 "error": str(e),
@@ -414,4 +410,4 @@ class DeepResearchTool(BaseSearchTool):
                 self.dual_searcher.close()
                 
         except Exception as e:
-            logger.error(f"深度研究工具关闭失败: {e}")
+            print(f"深度研究工具关闭失败: {e}")

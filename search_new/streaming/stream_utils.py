@@ -7,7 +7,7 @@
 import asyncio
 import time
 import re
-from typing import List, Dict, Any, Optional, AsyncGenerator, Generator, Union
+from typing import List, Dict, Any, Optional, AsyncGenerator, Generator
 
 from .stream_processor import StreamChunk
 

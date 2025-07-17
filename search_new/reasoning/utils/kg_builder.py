@@ -4,15 +4,12 @@
 从文本中构建知识图谱，支持实体识别、关系抽取和图谱更新
 """
 
-from typing import Dict, List, Any, Optional, Tuple, Set
+from typing import Dict, List, Any, Optional
 import time
-import logging
 from dataclasses import dataclass, field
 
 from search_new.reasoning.utils.nlp_utils import extract_entities, clean_text
 from search_new.reasoning.utils.prompts import get_prompt
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -86,7 +83,7 @@ class KnowledgeGraphBuilder:
         self.entity_cache: Dict[str, KGEntity] = {}
         self.relation_cache: Dict[str, KGRelation] = {}
         
-        logger.info("知识图谱构建器初始化完成")
+        print("知识图谱构建器初始化完成")
     
     def create_knowledge_graph(self, graph_id: Optional[str] = None) -> str:
         """
@@ -105,7 +102,7 @@ class KnowledgeGraphBuilder:
         self.knowledge_graphs[graph_id] = kg
         self.current_graph_id = graph_id
         
-        logger.info(f"创建知识图谱: {graph_id}")
+        print(f"创建知识图谱: {graph_id}")
         return graph_id
     
     def extract_entities_from_text(self, text: str, source: str = "") -> List[KGEntity]:
@@ -154,11 +151,11 @@ class KnowledgeGraphBuilder:
                 entities = sorted(entities, key=lambda x: x.confidence, reverse=True)
                 entities = entities[:self.max_entities_per_text]
             
-            logger.info(f"从文本中抽取实体: {len(entities)} 个")
+            print(f"从文本中抽取实体: {len(entities)} 个")
             return entities
             
         except Exception as e:
-            logger.error(f"实体抽取失败: {e}")
+            print(f"实体抽取失败: {e}")
             return []
     
     def _extract_entities_with_llm(self, text: str, source: str) -> List[KGEntity]:
@@ -196,7 +193,7 @@ class KnowledgeGraphBuilder:
             return entities
             
         except Exception as e:
-            logger.error(f"LLM实体抽取失败: {e}")
+            print(f"LLM实体抽取失败: {e}")
             return []
     
     def extract_relations_from_text(self, text: str, entities: List[KGEntity], 
@@ -239,11 +236,11 @@ class KnowledgeGraphBuilder:
                 valid_relations = sorted(valid_relations, key=lambda x: x.confidence, reverse=True)
                 valid_relations = valid_relations[:self.max_relations_per_text]
             
-            logger.info(f"从文本中抽取关系: {len(valid_relations)} 个")
+            print(f"从文本中抽取关系: {len(valid_relations)} 个")
             return valid_relations
             
         except Exception as e:
-            logger.error(f"关系抽取失败: {e}")
+            print(f"关系抽取失败: {e}")
             return []
     
     def _extract_relations_with_llm(self, text: str, entity_names: List[str], 
@@ -284,7 +281,7 @@ class KnowledgeGraphBuilder:
             return relations
             
         except Exception as e:
-            logger.error(f"LLM关系抽取失败: {e}")
+            print(f"LLM关系抽取失败: {e}")
             return []
     
     def build_knowledge_graph_from_text(self, text: str, source: str = "", 
@@ -328,11 +325,11 @@ class KnowledgeGraphBuilder:
             
             kg.updated_at = time.time()
             
-            logger.info(f"构建知识图谱完成: {len(entities)} 个实体, {len(relations)} 个关系")
+            print(f"构建知识图谱完成: {len(entities)} 个实体, {len(relations)} 个关系")
             return graph_id
             
         except Exception as e:
-            logger.error(f"知识图谱构建失败: {e}")
+            print(f"知识图谱构建失败: {e}")
             return ""
     
     def _deduplicate_entities(self, entities: List[KGEntity]) -> List[KGEntity]:
@@ -358,7 +355,7 @@ class KnowledgeGraphBuilder:
             return unique_entities
             
         except Exception as e:
-            logger.error(f"实体去重失败: {e}")
+            print(f"实体去重失败: {e}")
             return entities
     
     def get_knowledge_graph_summary(self, graph_id: Optional[str] = None) -> Dict[str, Any]:
@@ -401,7 +398,7 @@ class KnowledgeGraphBuilder:
             }
             
         except Exception as e:
-            logger.error(f"获取图谱摘要失败: {e}")
+            print(f"获取图谱摘要失败: {e}")
             return {"error": str(e)}
     
     def merge_knowledge_graphs(self, source_graph_id: str, target_graph_id: str) -> bool:
@@ -418,7 +415,7 @@ class KnowledgeGraphBuilder:
         try:
             if (source_graph_id not in self.knowledge_graphs or 
                 target_graph_id not in self.knowledge_graphs):
-                logger.error("源图谱或目标图谱不存在")
+                print("源图谱或目标图谱不存在")
                 return False
             
             source_kg = self.knowledge_graphs[source_graph_id]
@@ -444,11 +441,11 @@ class KnowledgeGraphBuilder:
             
             target_kg.updated_at = time.time()
             
-            logger.info(f"知识图谱合并完成: {source_graph_id} -> {target_graph_id}")
+            print(f"知识图谱合并完成: {source_graph_id} -> {target_graph_id}")
             return True
             
         except Exception as e:
-            logger.error(f"知识图谱合并失败: {e}")
+            print(f"知识图谱合并失败: {e}")
             return False
     
     def clear_knowledge_graph(self, graph_id: Optional[str] = None):
@@ -467,7 +464,7 @@ class KnowledgeGraphBuilder:
             if graph_id == self.current_graph_id:
                 self.current_graph_id = None
             
-            logger.info(f"清空知识图谱: {graph_id}")
+            print(f"清空知识图谱: {graph_id}")
     
     def close(self):
         """关闭知识图谱构建器"""
@@ -475,4 +472,4 @@ class KnowledgeGraphBuilder:
         self.entity_cache.clear()
         self.relation_cache.clear()
         self.current_graph_id = None
-        logger.info("知识图谱构建器已关闭")
+        print("知识图谱构建器已关闭")

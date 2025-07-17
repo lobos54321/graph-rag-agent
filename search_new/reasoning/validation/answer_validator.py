@@ -4,17 +4,14 @@
 验证生成答案的准确性、完整性和一致性
 """
 
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional
 import time
-import logging
 from dataclasses import dataclass, field
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from search_new.config import get_reasoning_config
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -73,7 +70,7 @@ class AnswerValidator:
         # 验证历史
         self.validation_history: List[ValidationResult] = []
         
-        logger.info("答案验证器初始化完成")
+        print("答案验证器初始化完成")
     
     def _setup_validation_chains(self):
         """设置验证处理链"""
@@ -145,7 +142,7 @@ class AnswerValidator:
             self.consistency_chain = consistency_prompt | self.llm | StrOutputParser()
             
         except Exception as e:
-            logger.error(f"验证链设置失败: {e}")
+            print(f"验证链设置失败: {e}")
             raise
     
     def validate_answer(self, question: str, answer: str, 
@@ -169,7 +166,7 @@ class AnswerValidator:
             )
         
         try:
-            logger.info(f"开始验证答案: {question[:50]}...")
+            print(f"开始验证答案: {question[:50]}...")
             
             # 准备证据文本
             evidence_text = "\n".join(evidence) if evidence else "无参考信息"
@@ -215,11 +212,11 @@ class AnswerValidator:
             # 记录验证历史
             self.validation_history.append(validation_result)
             
-            logger.info(f"答案验证完成，总分: {overall_score:.2f}")
+            print(f"答案验证完成，总分: {overall_score:.2f}")
             return validation_result
             
         except Exception as e:
-            logger.error(f"答案验证失败: {e}")
+            print(f"答案验证失败: {e}")
             return ValidationResult(
                 is_valid=False,
                 confidence_score=0.0,
@@ -239,7 +236,7 @@ class AnswerValidator:
             return self._parse_validation_result(result)
             
         except Exception as e:
-            logger.error(f"准确性验证失败: {e}")
+            print(f"准确性验证失败: {e}")
             return {"accuracy_score": 0.5, "issues": [f"准确性验证失败: {str(e)}"]}
     
     def _validate_completeness(self, question: str, answer: str) -> Dict[str, Any]:
@@ -253,7 +250,7 @@ class AnswerValidator:
             return self._parse_validation_result(result)
             
         except Exception as e:
-            logger.error(f"完整性验证失败: {e}")
+            print(f"完整性验证失败: {e}")
             return {"completeness_score": 0.5, "issues": [f"完整性验证失败: {str(e)}"]}
     
     def _validate_consistency(self, answer: str) -> Dict[str, Any]:
@@ -266,7 +263,7 @@ class AnswerValidator:
             return self._parse_validation_result(result)
             
         except Exception as e:
-            logger.error(f"一致性验证失败: {e}")
+            print(f"一致性验证失败: {e}")
             return {"consistency_score": 0.5, "issues": [f"一致性验证失败: {str(e)}"]}
     
     def _parse_validation_result(self, result: str) -> Dict[str, Any]:
@@ -275,7 +272,7 @@ class AnswerValidator:
             import json
             return json.loads(result)
         except json.JSONDecodeError:
-            logger.warning(f"验证结果解析失败: {result}")
+            print(f"验证结果解析失败: {result}")
             return {"score": 0.5, "issues": ["结果解析失败"]}
     
     def assess_answer_quality(self, question: str, answer: str, 
@@ -340,7 +337,7 @@ class AnswerValidator:
             )
             
         except Exception as e:
-            logger.error(f"质量评估失败: {e}")
+            print(f"质量评估失败: {e}")
             return AnswerQuality(
                 overall_score=0.0,
                 feedback=[f"质量评估失败: {str(e)}"]
@@ -374,7 +371,7 @@ class AnswerValidator:
             return max(0.0, min(1.0, score))
             
         except Exception as e:
-            logger.error(f"清晰度评估失败: {e}")
+            print(f"清晰度评估失败: {e}")
             return 0.5
     
     def get_validation_statistics(self) -> Dict[str, Any]:
@@ -409,15 +406,15 @@ class AnswerValidator:
             }
             
         except Exception as e:
-            logger.error(f"获取验证统计失败: {e}")
+            print(f"获取验证统计失败: {e}")
             return {"error": str(e)}
     
     def clear_history(self):
         """清空验证历史"""
         self.validation_history.clear()
-        logger.info("验证历史已清空")
+        print("验证历史已清空")
     
     def close(self):
         """关闭验证器"""
         self.clear_history()
-        logger.info("答案验证器已关闭")
+        print("答案验证器已关闭")

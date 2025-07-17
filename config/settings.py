@@ -83,3 +83,111 @@ GDS_TIMEOUT_SECONDS = 300      # GDS超时时间(秒)
 
 # 索引和社区检测配置
 COMMUNITY_BATCH_SIZE = 50      # 社区处理批次大小
+
+# ===== 搜索模块配置 =====
+
+# 本地搜索配置
+LOCAL_SEARCH_CONFIG = {
+    # 向量检索参数
+    "top_entities": 10,
+    "top_chunks": 10,
+    "top_communities": 2,
+    "top_outside_rels": 10,
+    "top_inside_rels": 10,
+
+    # 索引配置
+    "index_name": "vector",
+    "response_type": response_type,
+
+    # 检索查询模板
+    "retrieval_query": """
+    WITH node AS chunk, score AS similarity
+    CALL {
+        WITH chunk
+        MATCH (chunk)-[:PART_OF]->(d:__Document__)
+        RETURN d.id AS document_id, d.title AS document_title
+    }
+    CALL {
+        WITH chunk
+        OPTIONAL MATCH (chunk)-[:HAS_ENTITY]->(e:__Entity__)
+        WITH e ORDER BY e.rank DESC LIMIT $topChunks
+        RETURN collect(e{.id, .description, .rank}) AS entities
+    }
+    CALL {
+        WITH chunk
+        OPTIONAL MATCH (chunk)-[:PART_OF]->(d:__Document__)
+        OPTIONAL MATCH (d)-[:IN_COMMUNITY]->(c:__Community__)
+        WITH c ORDER BY c.rank DESC LIMIT $topCommunities
+        RETURN collect(c{.id, .summary, .rank}) AS communities
+    }
+    CALL {
+        WITH chunk
+        OPTIONAL MATCH (chunk)-[:HAS_ENTITY]->(e:__Entity__)
+        OPTIONAL MATCH (e)-[r:RELATED]->(e2:__Entity__)
+        WHERE NOT (chunk)-[:HAS_ENTITY]->(e2)
+        WITH r ORDER BY r.rank DESC LIMIT $topOutsideRels
+        RETURN collect(r{.description, .rank, source: e.id, target: e2.id}) AS outside_rels
+    }
+    CALL {
+        WITH chunk
+        OPTIONAL MATCH (chunk)-[:HAS_ENTITY]->(e:__Entity__)
+        OPTIONAL MATCH (e)-[r:RELATED]->(e2:__Entity__)
+        WHERE (chunk)-[:HAS_ENTITY]->(e2)
+        WITH r ORDER BY r.rank DESC LIMIT $topInsideRels
+        RETURN collect(r{.description, .rank, source: e.id, target: e2.id}) AS inside_rels
+    }
+    RETURN chunk.text AS text,
+           similarity,
+           document_id,
+           document_title,
+           entities,
+           communities,
+           outside_rels,
+           inside_rels
+    ORDER BY similarity DESC
+    """,
+}
+
+# 全局搜索配置
+GLOBAL_SEARCH_CONFIG = {
+    # 社区层级配置
+    "default_level": 2,
+    "response_type": response_type,
+
+    # 批处理配置
+    "batch_size": 10,
+    "max_communities": 100,
+}
+
+# 缓存配置
+SEARCH_CACHE_CONFIG = {
+    # 缓存目录
+    "base_cache_dir": "./cache",
+    "local_search_cache_dir": "./cache/local_search",
+    "global_search_cache_dir": "./cache/global_search",
+    "deep_research_cache_dir": "./cache/deep_research",
+
+    # 缓存策略
+    "max_cache_size": 200,
+    "cache_ttl": 3600,  # 1小时
+
+    # 内存缓存配置
+    "memory_cache_enabled": True,
+    "disk_cache_enabled": True,
+}
+
+# 推理配置
+REASONING_CONFIG = {
+    # 迭代配置
+    "max_iterations": 5,
+    "max_search_limit": 10,
+
+    # 思考引擎配置
+    "thinking_depth": 3,
+    "exploration_width": 3,
+    "max_exploration_steps": 5,
+
+    # 证据链配置
+    "max_evidence_items": 50,
+    "evidence_relevance_threshold": 0.7,
+}
