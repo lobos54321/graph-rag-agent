@@ -25,27 +25,30 @@ class GlobalSearch(BaseSearch):
     3. Reduce阶段：整合所有中间结果生成最终答案
     """
     
-    def __init__(self, 
-                 llm=None, 
-                 response_type: str = "多个段落"):
+    def __init__(self,
+                 llm=None,
+                 response_type: str = "多个段落",
+                 enable_cache: bool = True):
         """
         初始化全局搜索类
-        
+
         参数:
             llm: 大语言模型实例
             response_type: 响应类型，默认为"多个段落"
+            enable_cache: 是否启用缓存
         """
         super().__init__(
             llm=llm,
-            cache_dir=None  # 将在父类中设置
+            cache_dir=None,  # 将在父类中设置
+            enable_cache=enable_cache
         )
         
         # 搜索配置
         self.response_type = response_type
         self.global_config = self.config.global_search
 
-        # 设置缓存目录
-        if not hasattr(self, 'cache_manager') or self.cache_manager is None:
+        # 设置缓存目录（如果启用缓存且父类没有设置）
+        if enable_cache and (not hasattr(self, 'cache_manager') or self.cache_manager is None):
             self._setup_cache(self.config.cache.global_search_cache_dir)
         
         # 全局搜索参数
@@ -58,21 +61,82 @@ class GlobalSearch(BaseSearch):
     def _get_community_data(self, level: int) -> List[Dict]:
         """
         获取指定层级的社区数据
-        
+
         参数:
             level: 社区层级
-            
+
         返回:
             List[Dict]: 社区数据字典列表
         """
         try:
+            # 首先检查指定层级是否有数据
+            check_cypher = """
+            MATCH (c:__Community__)
+            WHERE c.level = $level
+            RETURN count(*) as count
+            """
+
+            check_result = self._execute_db_query(check_cypher, {"level": level})
+            count = 0
+            # db_manager.execute_query返回的是pandas DataFrame
+            if hasattr(check_result, 'iloc') and len(check_result) > 0:
+                count = check_result.iloc[0]['count']
+            elif hasattr(check_result, 'data') and check_result.data():
+                count = check_result.data()[0]['count']
+            elif hasattr(check_result, 'to_dict'):
+                result_dict = check_result.to_dict()
+                if 'data' in result_dict and result_dict['data']:
+                    count = result_dict['data'][0]['count']
+            elif isinstance(check_result, list) and check_result:
+                count = check_result[0].get('count', 0)
+
+            print(f"获取到 {count} 个层级 {level} 的社区")
+
+            # 如果指定层级没有数据，尝试其他层级
+            if count == 0:
+                print(f"层级 {level} 没有数据，尝试查找其他层级...")
+                available_levels_cypher = """
+                MATCH (c:__Community__)
+                RETURN DISTINCT c.level as level, count(*) as count
+                ORDER BY c.level
+                """
+
+                levels_result = self._execute_db_query(available_levels_cypher, {})
+                available_levels = []
+
+                # db_manager.execute_query返回的是pandas DataFrame
+                if hasattr(levels_result, 'to_dict') and hasattr(levels_result, 'iloc'):
+                    # 转换DataFrame为字典列表
+                    available_levels = levels_result.to_dict('records')
+                elif hasattr(levels_result, 'data'):
+                    available_levels = levels_result.data()
+                elif hasattr(levels_result, 'to_dict'):
+                    result_dict = levels_result.to_dict()
+                    if 'data' in result_dict:
+                        available_levels = result_dict['data']
+                elif isinstance(levels_result, list):
+                    available_levels = levels_result
+
+                if available_levels:
+                    print("可用的社区层级:")
+                    for level_info in available_levels:
+                        print(f"  层级 {level_info.get('level', 'N/A')}: {level_info.get('count', 0)} 个社区")
+
+                    # 使用第一个可用层级
+                    level = available_levels[0].get('level', level)
+                    print(f"使用层级 {level} 进行搜索")
+                else:
+                    print("没有找到任何社区数据")
+                    return []
+
+            # 获取社区数据（简化查询）
             cypher = """
             MATCH (c:__Community__)
             WHERE c.level = $level
-            RETURN {communityId:c.id, full_content:c.full_content} AS output
+            RETURN {communityId:c.id, full_content:coalesce(c.full_content, c.summary, c.title, '无内容')} AS output
             LIMIT $max_communities
             """
-            
+
             result = self._execute_db_query(cypher, {
                 "level": level,
                 "max_communities": self.max_communities
@@ -80,14 +144,17 @@ class GlobalSearch(BaseSearch):
             
             # 转换结果格式
             communities = []
-            if hasattr(result, 'data'):
+            # db_manager.execute_query返回的是pandas DataFrame
+            if hasattr(result, 'iloc') and len(result) > 0:
+                communities = result['output'].tolist()
+            elif hasattr(result, 'data'):
                 communities = [record['output'] for record in result.data()]
             elif hasattr(result, 'to_dict'):
                 result_dict = result.to_dict()
                 if 'data' in result_dict:
                     communities = [record['output'] for record in result_dict['data']]
             else:
-                # 处理pandas DataFrame格式
+                # 处理其他格式
                 if hasattr(result, 'iterrows'):
                     communities = [row['output'] for _, row in result.iterrows()]
                 else:

@@ -49,7 +49,6 @@ from .streaming import (
 # 工具函数
 from .utils import (
     VectorUtils,
-    CacheManager,
     PerformanceMonitor,
     get_performance_monitor
 )
@@ -93,7 +92,6 @@ __all__ = [
 
     # 工具函数
     "VectorUtils",
-    "CacheManager",
     "PerformanceMonitor",
     "get_performance_monitor"
 ]

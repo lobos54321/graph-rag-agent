@@ -5,12 +5,7 @@
 """
 
 from .vector_utils import VectorUtils
-from .cache_manager import (
-    CacheBackend,
-    MemoryCacheBackend,
-    DiskCacheBackend,
-    CacheManager
-)
+# 缓存管理已迁移到项目原有的CacheManage模块
 from .performance_monitor import (
     PerformanceMetric,
     SearchStats,
@@ -22,12 +17,6 @@ from .performance_monitor import (
 __all__ = [
     # 向量工具
     "VectorUtils",
-
-    # 缓存管理
-    "CacheBackend",
-    "MemoryCacheBackend",
-    "DiskCacheBackend",
-    "CacheManager",
 
     # 性能监控
     "PerformanceMetric",

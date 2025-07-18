@@ -68,10 +68,10 @@ class EvidenceTracker:
         self.config = get_reasoning_config()
         
         # 配置参数
-        self.max_evidence_items = max_evidence_items or self.config.evidence.max_evidence_per_step
-        self.relevance_threshold = self.config.evidence.evidence_relevance_threshold
-        self.enable_validation = self.config.evidence.enable_evidence_validation
-        self.enable_deduplication = self.config.evidence.evidence_deduplication
+        self.max_evidence_items = max_evidence_items or self.config.max_evidence_items
+        self.relevance_threshold = self.config.evidence_relevance_threshold
+        self.enable_validation = getattr(self.config, 'enable_evidence_validation', True)
+        self.enable_deduplication = getattr(self.config, 'evidence_deduplication', True)
         
         # 证据链管理
         self.evidence_chains: Dict[str, EvidenceChain] = {}

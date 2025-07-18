@@ -7,6 +7,9 @@ NLP工具模块
 import re
 import string
 from typing import List, Dict
+import jieba
+import jieba.analyse
+from server.utils.keywords import extract_smart_keywords
 
 def clean_text(text: str) -> str:
     """
@@ -103,30 +106,31 @@ def extract_queries_from_text(text: str) -> List[str]:
 
 def split_sentences(text: str) -> List[str]:
     """
-    分割句子
-    
+    分割句子，使用jieba改进的分句
+
     参数:
         text: 输入文本
-        
+
     返回:
         List[str]: 句子列表
     """
     if not text:
         return []
-    
+
     try:
-        # 简单的句子分割
-        sentences = re.split(r'[.!?。！？]', text)
-        
+        # 使用更精确的中英文句子分割
+        # 中文句号、英文句号、感叹号、问号
+        sentences = re.split(r'[.!?。！？；;]', text)
+
         # 清理和过滤
         cleaned_sentences = []
         for sentence in sentences:
             sentence = sentence.strip()
             if sentence and len(sentence) > 5:
                 cleaned_sentences.append(sentence)
-        
+
         return cleaned_sentences
-        
+
     except Exception as e:
         print(f"句子分割失败: {e}")
         return [text]
@@ -183,67 +187,56 @@ def is_query_like(text: str) -> bool:
 
 def extract_keywords(text: str, max_keywords: int = 10) -> List[str]:
     """
-    提取关键词
-    
+    提取关键词，使用jieba智能分词和关键词提取
+
     参数:
         text: 输入文本
         max_keywords: 最大关键词数量
-        
+
     返回:
         List[str]: 关键词列表
     """
     if not text:
         return []
-    
+
     try:
-        # 简单的关键词提取
-        # 移除标点符号
-        text_clean = text.translate(str.maketrans('', '', string.punctuation))
-        
-        # 分词（简单按空格分割）
-        words = text_clean.split()
-        
-        # 过滤停用词（简单版本）
-        stop_words = {
-            '的', '了', '在', '是', '我', '有', '和', '就', '不', '人', '都', '一', '一个',
-            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'
-        }
-        
-        # 提取关键词
-        keywords = []
-        word_freq = {}
-        
-        for word in words:
-            word = word.lower().strip()
-            if len(word) > 1 and word not in stop_words:
-                word_freq[word] = word_freq.get(word, 0) + 1
-        
-        # 按频率排序
-        sorted_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)
-        
-        # 取前N个关键词
-        keywords = [word for word, freq in sorted_words[:max_keywords]]
-        
+        # 使用项目中已有的智能关键词提取功能
+        keywords = extract_smart_keywords(text)
+
+        # 限制数量
+        if len(keywords) > max_keywords:
+            keywords = keywords[:max_keywords]
+
         return keywords
-        
+
     except Exception as e:
         print(f"关键词提取失败: {e}")
-        return []
+        # 回退到简单实现
+        try:
+            # 使用jieba的TF-IDF提取关键词
+            keywords = jieba.analyse.extract_tags(text, topK=max_keywords)
+            return keywords
+        except:
+            # 最后回退到基础分词
+            words = jieba.cut(text, cut_all=False)
+            stop_words = {'的', '了', '在', '是', '我', '有', '和', '就', '不', '人', '都', '一', '一个'}
+            keywords = [word for word in words if len(word) >= 2 and word not in stop_words]
+            return keywords[:max_keywords]
 
 
 def extract_entities(text: str) -> Dict[str, List[str]]:
     """
-    提取实体（简单版本）
-    
+    提取实体，使用jieba分词改进的实体识别
+
     参数:
         text: 输入文本
-        
+
     返回:
         Dict[str, List[str]]: 实体字典
     """
     if not text:
         return {}
-    
+
     try:
         entities = {
             'persons': [],
@@ -251,32 +244,57 @@ def extract_entities(text: str) -> Dict[str, List[str]]:
             'locations': [],
             'others': []
         }
-        
-        # 简单的实体识别模式
+
+        # 使用jieba分词获取词汇
+        words = list(jieba.cut(text))
+
+        # 改进的实体识别模式
         patterns = {
             'persons': [
                 r'([A-Z][a-z]+ [A-Z][a-z]+)',  # 英文人名
-                r'([\u4e00-\u9fff]{2,4}(?:先生|女士|教授|博士|老师))',  # 中文人名+称谓
+                r'([\u4e00-\u9fff]{2,4}(?:先生|女士|教授|博士|老师|院士|主任|经理|总裁|董事长))',  # 中文人名+称谓
+                r'([\u4e00-\u9fff]{2,3})',  # 可能的中文人名
             ],
             'organizations': [
-                r'([A-Z][a-zA-Z\s]+(?:Inc|Corp|Ltd|Company|University|Institute))',  # 英文机构
-                r'([\u4e00-\u9fff]+(?:公司|大学|学院|研究所|机构|组织))',  # 中文机构
+                r'([A-Z][a-zA-Z\s]+(?:Inc|Corp|Ltd|Company|University|Institute|Foundation))',  # 英文机构
+                r'([\u4e00-\u9fff]+(?:公司|大学|学院|研究所|机构|组织|基金会|协会|学会|中心|部门|委员会))',  # 中文机构
             ],
             'locations': [
-                r'([A-Z][a-z]+(?:\s[A-Z][a-z]+)*(?:\sCity|\sState|\sCountry))',  # 英文地名
-                r'([\u4e00-\u9fff]+(?:市|省|县|区|国|州))',  # 中文地名
+                r'([A-Z][a-z]+(?:\s[A-Z][a-z]+)*(?:\sCity|\sState|\sCountry|\sProvince))',  # 英文地名
+                r'([\u4e00-\u9fff]+(?:市|省|县|区|国|州|镇|村|路|街|道|港|岛|山|河|湖))',  # 中文地名
             ]
         }
-        
+
+        # 从分词结果中提取可能的实体
+        for word in words:
+            if len(word) >= 2:
+                # 检查是否匹配实体模式
+                matched = False
+                for entity_type, type_patterns in patterns.items():
+                    for pattern in type_patterns:
+                        if re.match(pattern, word):
+                            if word not in entities[entity_type]:
+                                entities[entity_type].append(word)
+                            matched = True
+                            break
+                    if matched:
+                        break
+
+                # 如果没有匹配到特定类型，加入others
+                if not matched and len(word) >= 3 and re.match(r'[\u4e00-\u9fff]+', word):
+                    if word not in entities['others']:
+                        entities['others'].append(word)
+
+        # 从原文本中使用正则表达式提取
         for entity_type, type_patterns in patterns.items():
             for pattern in type_patterns:
                 matches = re.findall(pattern, text)
                 for match in matches:
                     if match and match not in entities[entity_type]:
                         entities[entity_type].append(match)
-        
+
         return entities
-        
+
     except Exception as e:
         print(f"实体提取失败: {e}")
         return {}

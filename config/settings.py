@@ -101,57 +101,57 @@ LOCAL_SEARCH_CONFIG = {
 
     # 检索查询模板
     "retrieval_query": """
-    WITH node AS chunk, score AS similarity
-    CALL {
-        WITH chunk
-        MATCH (chunk)-[:PART_OF]->(d:__Document__)
-        RETURN d.id AS document_id, d.title AS document_title
-    }
-    CALL {
-        WITH chunk
-        OPTIONAL MATCH (chunk)-[:HAS_ENTITY]->(e:__Entity__)
-        WITH e ORDER BY e.rank DESC LIMIT $topChunks
-        RETURN collect(e{.id, .description, .rank}) AS entities
-    }
-    CALL {
-        WITH chunk
-        OPTIONAL MATCH (chunk)-[:PART_OF]->(d:__Document__)
-        OPTIONAL MATCH (d)-[:IN_COMMUNITY]->(c:__Community__)
-        WITH c ORDER BY c.rank DESC LIMIT $topCommunities
-        RETURN collect(c{.id, .summary, .rank}) AS communities
-    }
-    CALL {
-        WITH chunk
-        OPTIONAL MATCH (chunk)-[:HAS_ENTITY]->(e:__Entity__)
-        OPTIONAL MATCH (e)-[r:RELATED]->(e2:__Entity__)
-        WHERE NOT (chunk)-[:HAS_ENTITY]->(e2)
-        WITH r ORDER BY r.rank DESC LIMIT $topOutsideRels
-        RETURN collect(r{.description, .rank, source: e.id, target: e2.id}) AS outside_rels
-    }
-    CALL {
-        WITH chunk
-        OPTIONAL MATCH (chunk)-[:HAS_ENTITY]->(e:__Entity__)
-        OPTIONAL MATCH (e)-[r:RELATED]->(e2:__Entity__)
-        WHERE (chunk)-[:HAS_ENTITY]->(e2)
-        WITH r ORDER BY r.rank DESC LIMIT $topInsideRels
-        RETURN collect(r{.description, .rank, source: e.id, target: e2.id}) AS inside_rels
-    }
-    RETURN chunk.text AS text,
-           similarity,
-           document_id,
-           document_title,
-           entities,
-           communities,
-           outside_rels,
-           inside_rels
-    ORDER BY similarity DESC
+    WITH collect(node) as nodes
+    WITH
+    collect {
+        UNWIND nodes as n
+        MATCH (n)<-[:MENTIONS]-(c:__Chunk__)
+        WITH distinct c, count(distinct n) as freq
+        RETURN {id:c.id, text: c.text} AS chunkText
+        ORDER BY freq DESC
+        LIMIT $topChunks
+    } AS text_mapping,
+    collect {
+        UNWIND nodes as n
+        MATCH (n)-[:IN_COMMUNITY]->(c:__Community__)
+        WITH distinct c, c.community_rank as rank, c.weight AS weight
+        RETURN c.summary
+        ORDER BY rank, weight DESC
+        LIMIT $topCommunities
+    } AS report_mapping,
+    collect {
+        UNWIND nodes as n
+        MATCH (n)-[r]-(m:__Entity__)
+        WHERE NOT m IN nodes
+        RETURN r.description AS descriptionText
+        ORDER BY r.weight DESC
+        LIMIT $topOutsideRels
+    } as outsideRels,
+    collect {
+        UNWIND nodes as n
+        MATCH (n)-[r]-(m:__Entity__)
+        WHERE m IN nodes
+        RETURN r.description AS descriptionText
+        ORDER BY r.weight DESC
+        LIMIT $topInsideRels
+    } as insideRels,
+    collect {
+        UNWIND nodes as n
+        RETURN n.description AS descriptionText
+    } as entities
+    RETURN {
+        Chunks: text_mapping,
+        Reports: report_mapping,
+        Relationships: outsideRels + insideRels,
+        Entities: entities
+    } AS text, 1.0 AS score, {} AS metadata
     """,
 }
 
 # 全局搜索配置
 GLOBAL_SEARCH_CONFIG = {
     # 社区层级配置
-    "default_level": 2,
+    "default_level": 0,  # 层级0
     "response_type": response_type,
 
     # 批处理配置

@@ -13,7 +13,7 @@ from langchain_core.tools import BaseTool
 from model.get_models import get_llm_model, get_embeddings_model
 from config.neo4jdb import get_db_manager
 from search_new.config import get_search_config
-from search_new.utils.cache_manager import CacheManager, MemoryCacheBackend, DiskCacheBackend
+from CacheManage import CacheManager, ContextAwareCacheKeyStrategy, HybridCacheBackend
 from search_new.utils.vector_utils import VectorUtils
 
 
@@ -67,8 +67,9 @@ class BaseSearchTool(ABC):
             "keyword_errors": 0
         }
         
-        # 设置处理链
-        self._setup_chains()
+        # 设置处理链（如果子类没有要求跳过）
+        if not getattr(self, '_skip_setup_chains', False):
+            self._setup_chains()
 
         print(f"{self.__class__.__name__} 初始化完成")
     
@@ -77,31 +78,18 @@ class BaseSearchTool(ABC):
         try:
             if cache_dir is None:
                 cache_dir = self.config.cache.base_cache_dir
-            
-            # 创建缓存后端
-            memory_backend = None
-            disk_backend = None
-            
-            if self.config.cache.memory_cache_enabled:
-                memory_backend = MemoryCacheBackend(
-                    max_size=self.config.cache.max_cache_size,
-                    default_ttl=self.config.cache.cache_ttl
-                )
-            
-            if self.config.cache.disk_cache_enabled:
-                disk_backend = DiskCacheBackend(
-                    cache_dir=cache_dir,
-                    default_ttl=self.config.cache.cache_ttl
-                )
-            
-            # 创建缓存管理器
+
+            # 创建缓存管理器，使用项目原有的CacheManage模块
             self.cache_manager = CacheManager(
-                memory_backend=memory_backend,
-                disk_backend=disk_backend,
-                use_memory=self.config.cache.memory_cache_enabled,
-                use_disk=self.config.cache.disk_cache_enabled
+                key_strategy=ContextAwareCacheKeyStrategy(),
+                storage_backend=HybridCacheBackend(
+                    cache_dir=cache_dir,
+                    memory_max_size=self.config.cache.max_cache_size,
+                    disk_max_size=self.config.cache.max_cache_size * 5
+                ),
+                cache_dir=cache_dir
             )
-            
+
         except Exception as e:
             print(f"缓存设置失败: {e}")
             self.cache_manager = None
@@ -174,12 +162,13 @@ class BaseSearchTool(ABC):
         """从缓存获取结果"""
         if not self.cache_manager:
             return None
-            
+
         try:
             start_time = time.time()
+            # 使用原有CacheManager的get方法，支持向量相似性匹配
             result = self.cache_manager.get(cache_key)
             self.performance_metrics["cache_time"] += time.time() - start_time
-            
+
             if result is not None:
                 print(f"缓存命中: {cache_key}")
 
@@ -194,16 +183,15 @@ class BaseSearchTool(ABC):
         """设置缓存"""
         if not self.cache_manager:
             return False
-            
+
         try:
             start_time = time.time()
-            success = self.cache_manager.set(cache_key, value, ttl)
+            # 使用原有CacheManager的set方法
+            self.cache_manager.set(cache_key, value)
             self.performance_metrics["cache_time"] += time.time() - start_time
-            
-            if success:
-                print(f"缓存设置成功: {cache_key}")
 
-            return success
+            print(f"缓存设置成功: {cache_key}")
+            return True
 
         except Exception as e:
             print(f"缓存设置失败: {e}")

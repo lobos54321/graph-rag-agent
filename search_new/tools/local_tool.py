@@ -24,15 +24,33 @@ class LocalSearchTool(BaseSearchTool):
     
     def __init__(self):
         """初始化本地搜索工具"""
-        super().__init__(cache_dir=self.config.cache.local_search_cache_dir)
-        
+        # 设置标志，阻止基类调用_setup_chains
+        self._skip_setup_chains = True
+
+        # 先初始化基类以获取config
+        super().__init__()
+
+        # 然后设置特定的缓存目录
+        if hasattr(self, 'cache_manager') and self.cache_manager:
+            self.cache_manager.cache_dir = self.config.cache.local_search_cache_dir
+
         # 设置聊天历史，用于连续对话
         self.chat_history = []
-        
+
         # 创建本地搜索器
         self.local_searcher = LocalSearch(self.llm, self.embeddings)
-        self.retriever = self.local_searcher.as_retriever()
-        
+
+        # 创建检索器
+        try:
+            self.retriever = self.local_searcher.as_retriever()
+        except Exception as e:
+            print(f"创建检索器失败: {e}")
+            self.retriever = None
+
+        # 现在可以安全地设置处理链
+        if self.retriever:
+            self._setup_chains()
+
         print("本地搜索工具初始化完成")
     
     def _setup_chains(self):
@@ -67,13 +85,17 @@ class LocalSearchTool(BaseSearchTool):
     def _setup_rag_chain(self):
         """设置RAG处理链"""
         try:
+            # 创建检索器（如果还没有创建）
+            if self.retriever is None:
+                self.retriever = self.local_searcher.as_retriever()
+
             # 创建历史感知检索器
             contextualize_q_prompt = ChatPromptTemplate.from_messages([
                 ("system", contextualize_q_system_prompt),
                 MessagesPlaceholder("chat_history"),
                 ("human", "{input}"),
             ])
-            
+
             history_aware_retriever = create_history_aware_retriever(
                 self.llm, self.retriever, contextualize_q_prompt
             )
@@ -177,15 +199,15 @@ class LocalSearchTool(BaseSearchTool):
         
         return query, keywords
     
-    def search(self, query_input: Union[str, Dict[str, Any]]) -> str:
+    def search(self, query_input: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
         """
         执行本地搜索
-        
+
         参数:
             query_input: 查询输入，可以是字符串或字典
-            
+
         返回:
-            str: 搜索结果
+            Dict[str, Any]: 包含answer和sources的搜索结果
         """
         overall_start = time.time()
         self._reset_metrics()
@@ -201,6 +223,13 @@ class LocalSearchTool(BaseSearchTool):
             cached_result = self._get_from_cache(cache_key)
             if cached_result:
                 print(f"本地搜索缓存命中: {query[:50]}...")
+                # 如果缓存的是字符串，转换为字典格式
+                if isinstance(cached_result, str):
+                    return {
+                        "answer": cached_result,
+                        "sources": [],
+                        "metadata": {"from_cache": True}
+                    }
                 return cached_result
 
             print(f"开始本地搜索: {query[:100]}...")
@@ -214,33 +243,52 @@ class LocalSearchTool(BaseSearchTool):
             self.performance_metrics["query_time"] = time.time() - search_start
             
             # 获取结果
-            result = ai_msg.get("answer", "抱歉，我无法回答这个问题。")
-            
+            answer = ai_msg.get("answer", "抱歉，我无法回答这个问题。")
+
+            # 构建返回结果
+            if not answer or answer.strip() == "":
+                search_result = {
+                    "answer": "未找到相关信息",
+                    "sources": [],
+                    "metadata": {
+                        "query_time": self.performance_metrics["query_time"]
+                    }
+                }
+            else:
+                search_result = {
+                    "answer": answer,
+                    "sources": [],  # 本地搜索的sources信息在context中，这里简化处理
+                    "metadata": {
+                        "query_time": self.performance_metrics["query_time"]
+                    }
+                }
+
             # 更新聊天历史
-            self.chat_history.append({"human": query, "ai": result})
-            
+            self.chat_history.append({"human": query, "ai": answer})
+
             # 限制聊天历史长度
             if len(self.chat_history) > 10:
                 self.chat_history = self.chat_history[-10:]
-            
+
             # 缓存结果
-            self._set_to_cache(cache_key, result)
-            
+            self._set_to_cache(cache_key, search_result)
+
             # 记录性能指标
             self.performance_metrics["total_time"] = time.time() - overall_start
-            
-            if not result or result.strip() == "":
-                return "未找到相关信息"
-            
+
             print(f"本地搜索完成，耗时: {self.performance_metrics['total_time']:.2f}s")
-            return result
+            return search_result
 
         except Exception as e:
             print(f"本地搜索失败: {e}")
             self.error_stats["query_errors"] += 1
             self.performance_metrics["total_time"] = time.time() - overall_start
 
-            return f"搜索过程中出现问题: {str(e)}"
+            return {
+                "answer": f"搜索过程中出现问题: {str(e)}",
+                "sources": [],
+                "metadata": {"error": True}
+            }
     
     def search_with_details(self, query_input: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
         """

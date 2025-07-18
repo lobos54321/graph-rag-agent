@@ -59,9 +59,9 @@ class ThinkingEngine:
         self.config = get_reasoning_config()
         
         # 思考配置
-        self.max_depth = max_depth or self.config.thinking.max_thinking_depth
-        self.timeout = self.config.thinking.thinking_timeout
-        self.max_queries_per_step = self.config.thinking.max_queries_per_step
+        self.max_depth = max_depth or self.config.thinking_depth
+        self.timeout = getattr(self.config, 'thinking_timeout', 30)
+        self.max_queries_per_step = getattr(self.config, 'max_queries_per_step', 3)
         
         # 思考会话管理
         self.sessions: Dict[str, ThinkingSession] = {}
@@ -103,7 +103,15 @@ class ThinkingEngine:
     
     def _get_system_prompt(self) -> str:
         """获取系统提示"""
-        return self.config.get_prompt_template("thinking")
+        return """你是一个智能思考助手。请根据用户的查询进行深入思考，分析问题的各个方面，并生成有助于解决问题的搜索查询。
+
+请按照以下步骤进行思考：
+1. 分析查询的核心问题
+2. 识别需要搜索的关键信息
+3. 生成具体的搜索查询
+
+如果你认为已经有足够的信息来回答问题，请说"准备回答"。
+否则，请生成1-3个具体的搜索查询来获取更多信息。"""
     
     def initialize_with_query(self, query: str):
         """

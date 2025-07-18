@@ -21,7 +21,11 @@ class HybridSearchTool(BaseSearchTool):
     
     def __init__(self):
         """初始化混合搜索工具"""
-        super().__init__(cache_dir=f"{self.config.cache.base_cache_dir}/hybrid_search")
+        # 先初始化基类以获取config
+        super().__init__()
+        # 然后设置特定的缓存目录
+        if hasattr(self, 'cache_manager') and self.cache_manager:
+            self.cache_manager.cache_dir = f"{self.config.cache.base_cache_dir}/hybrid_search"
         
         # 创建子搜索工具
         self.local_tool = LocalSearchTool()
@@ -194,21 +198,29 @@ class HybridSearchTool(BaseSearchTool):
                 "reasoning": f"分类失败: {str(e)}"
             }
     
-    def _execute_local_search(self, query: str) -> str:
+    def _execute_local_search(self, query: str) -> Dict[str, Any]:
         """执行本地搜索"""
         try:
             return self.local_tool.search(query)
         except Exception as e:
             print(f"本地搜索执行失败: {e}")
-            return f"本地搜索失败: {str(e)}"
+            return {
+                "answer": f"本地搜索失败: {str(e)}",
+                "sources": [],
+                "metadata": {"error": True}
+            }
     
-    def _execute_global_search(self, query: str) -> str:
+    def _execute_global_search(self, query: str) -> Dict[str, Any]:
         """执行全局搜索"""
         try:
             return self.global_tool.search(query)
         except Exception as e:
             print(f"全局搜索执行失败: {e}")
-            return f"全局搜索失败: {str(e)}"
+            return {
+                "answer": f"全局搜索失败: {str(e)}",
+                "sources": [],
+                "metadata": {"error": True}
+            }
     
     def _fuse_results(self, query: str, local_result: str, global_result: str) -> str:
         """
@@ -246,15 +258,15 @@ class HybridSearchTool(BaseSearchTool):
             else:
                 return global_result
     
-    def search(self, query_input: Union[str, Dict[str, Any]]) -> str:
+    def search(self, query_input: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
         """
         执行混合搜索
-        
+
         参数:
             query_input: 查询输入，可以是字符串或字典
-            
+
         返回:
-            str: 搜索结果
+            Dict[str, Any]: 包含answer和sources的搜索结果
         """
         overall_start = time.time()
         self._reset_metrics()
@@ -275,6 +287,13 @@ class HybridSearchTool(BaseSearchTool):
             cached_result = self._get_from_cache(cache_key)
             if cached_result:
                 print(f"混合搜索缓存命中: {query[:50]}...")
+                # 如果缓存的是字符串，转换为字典格式
+                if isinstance(cached_result, str):
+                    return {
+                        "answer": cached_result,
+                        "sources": [],
+                        "metadata": {"from_cache": True}
+                    }
                 return cached_result
             
             print(f"开始混合搜索: {query[:100]}...")
@@ -287,39 +306,63 @@ class HybridSearchTool(BaseSearchTool):
             
             # 根据策略执行搜索
             search_start = time.time()
-            
+
             if strategy == "local":
-                result = self._execute_local_search(query)
+                search_result = self._execute_local_search(query)
             elif strategy == "global":
-                result = self._execute_global_search(query)
+                search_result = self._execute_global_search(query)
             else:  # hybrid
                 # 并行执行本地和全局搜索
                 local_result = self._execute_local_search(query)
                 global_result = self._execute_global_search(query)
-                
+
                 # 融合结果
-                result = self._fuse_results(query, local_result, global_result)
-            
+                fused_answer = self._fuse_results(query, local_result.get("answer", ""), global_result.get("answer", ""))
+
+                # 合并sources
+                all_sources = []
+                all_sources.extend(local_result.get("sources", []))
+                all_sources.extend(global_result.get("sources", []))
+
+                search_result = {
+                    "answer": fused_answer,
+                    "sources": all_sources,
+                    "metadata": {
+                        "strategy": "hybrid",
+                        "local_result": local_result,
+                        "global_result": global_result
+                    }
+                }
+
             self.performance_metrics["query_time"] = time.time() - search_start
-            
+
+            # 确保结果格式正确
+            if not search_result or not search_result.get("answer") or search_result["answer"].strip() == "":
+                search_result = {
+                    "answer": "未找到相关信息",
+                    "sources": [],
+                    "metadata": {"strategy": strategy}
+                }
+
             # 缓存结果
-            self._set_to_cache(cache_key, result)
-            
+            self._set_to_cache(cache_key, search_result)
+
             # 记录性能指标
             self.performance_metrics["total_time"] = time.time() - overall_start
-            
-            if not result or result.strip() == "":
-                return "未找到相关信息"
-            
+
             print(f"混合搜索完成，耗时: {self.performance_metrics['total_time']:.2f}s")
-            return result
+            return search_result
             
         except Exception as e:
             print(f"混合搜索失败: {e}")
             self.error_stats["query_errors"] += 1
             self.performance_metrics["total_time"] = time.time() - overall_start
-            
-            return f"搜索过程中出现问题: {str(e)}"
+
+            return {
+                "answer": f"搜索过程中出现问题: {str(e)}",
+                "sources": [],
+                "metadata": {"error": True}
+            }
     
     def search_with_details(self, query_input: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
         """

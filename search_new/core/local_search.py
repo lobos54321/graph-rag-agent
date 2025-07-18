@@ -26,30 +26,33 @@ class LocalSearch(BaseSearch):
     3. 使用LLM生成最终答案
     """
     
-    def __init__(self, 
-                 llm=None, 
+    def __init__(self,
+                 llm=None,
                  embeddings=None,
-                 response_type: str = "多个段落"):
+                 response_type: str = "多个段落",
+                 enable_cache: bool = True):
         """
         初始化本地搜索类
-        
+
         参数:
             llm: 大语言模型实例
             embeddings: 嵌入模型实例
             response_type: 响应类型
+            enable_cache: 是否启用缓存
         """
         super().__init__(
             llm=llm,
             embeddings=embeddings,
-            cache_dir=None  # 将在父类中设置
+            cache_dir=None,  # 将在父类中设置
+            enable_cache=enable_cache
         )
         
         # 搜索配置
         self.response_type = response_type
         self.local_config = self.config.local_search
 
-        # 设置缓存目录
-        if not hasattr(self, 'cache_manager') or self.cache_manager is None:
+        # 设置缓存目录（如果启用缓存且父类没有设置）
+        if enable_cache and (not hasattr(self, 'cache_manager') or self.cache_manager is None):
             self._setup_cache(self.config.cache.local_search_cache_dir)
         
         # 检索参数
@@ -196,11 +199,11 @@ class LocalSearch(BaseSearch):
     def search(self, query: str, **kwargs) -> str:
         """
         执行本地搜索
-        
+
         参数:
             query: 搜索查询字符串
             **kwargs: 其他参数
-            
+
         返回:
             str: 生成的最终答案
         """
@@ -221,7 +224,42 @@ class LocalSearch(BaseSearch):
             
             # 执行相似度搜索
             search_start = time.time()
-            docs = self._similarity_search(query)
+            try:
+                docs = self._similarity_search(query)
+            except Exception as e:
+                print(f"相似度搜索失败: {e}")
+                # 尝试简单的文本搜索作为备选
+                try:
+                    print("尝试使用简单文本搜索...")
+                    simple_query = """
+                    MATCH (c:__Chunk__)
+                    WHERE c.text CONTAINS $query
+                    RETURN c.text AS text
+                    LIMIT 5
+                    """
+                    result = self._execute_db_query(simple_query, {"query": query})
+                    docs = []
+
+                    if hasattr(result, 'data'):
+                        for record in result.data():
+                            from langchain.schema import Document
+                            docs.append(Document(page_content=record['text']))
+                    elif hasattr(result, 'to_dict'):
+                        result_dict = result.to_dict()
+                        if 'data' in result_dict:
+                            for record in result_dict['data']:
+                                from langchain.schema import Document
+                                docs.append(Document(page_content=record['text']))
+                    else:
+                        for record in result:
+                            from langchain.schema import Document
+                            docs.append(Document(page_content=record.get('text', '')))
+
+                    print(f"简单搜索找到 {len(docs)} 个文档")
+                except Exception as inner_e:
+                    print(f"简单搜索也失败了: {inner_e}")
+                    docs = []
+
             self.performance_metrics["query_time"] = time.time() - search_start
             
             # 提取上下文

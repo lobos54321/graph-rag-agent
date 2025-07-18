@@ -20,7 +20,11 @@ class GlobalSearchTool(BaseSearchTool):
     
     def __init__(self):
         """初始化全局搜索工具"""
-        super().__init__(cache_dir=self.config.cache.global_search_cache_dir)
+        # 先初始化基类以获取config
+        super().__init__()
+        # 然后设置特定的缓存目录
+        if hasattr(self, 'cache_manager') and self.cache_manager:
+            self.cache_manager.cache_dir = self.config.cache.global_search_cache_dir
         
         # 创建全局搜索器
         self.global_searcher = GlobalSearch(self.llm)
@@ -128,15 +132,15 @@ class GlobalSearchTool(BaseSearchTool):
         
         return query, level, keywords
     
-    def search(self, query_input: Union[str, Dict[str, Any]]) -> str:
+    def search(self, query_input: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
         """
         执行全局搜索
-        
+
         参数:
             query_input: 查询输入，可以是字符串或字典
-            
+
         返回:
-            str: 搜索结果
+            Dict[str, Any]: 包含answer和sources的搜索结果
         """
         overall_start = time.time()
         self._reset_metrics()
@@ -152,6 +156,13 @@ class GlobalSearchTool(BaseSearchTool):
             cached_result = self._get_from_cache(cache_key)
             if cached_result:
                 print(f"全局搜索缓存命中: {query[:50]}...")
+                # 如果缓存的是字符串，转换为字典格式
+                if isinstance(cached_result, str):
+                    return {
+                        "answer": cached_result,
+                        "sources": [],
+                        "metadata": {"from_cache": True}
+                    }
                 return cached_result
 
             print(f"开始全局搜索: {query[:100]}..., 层级: {level}")
@@ -161,24 +172,45 @@ class GlobalSearchTool(BaseSearchTool):
             result = self.global_searcher.search(query, level)
             self.performance_metrics["query_time"] = time.time() - search_start
 
+            # 构建返回结果
+            if not result or result.strip() == "":
+                search_result = {
+                    "answer": "未找到相关信息",
+                    "sources": [],
+                    "metadata": {
+                        "level": level,
+                        "query_time": self.performance_metrics["query_time"]
+                    }
+                }
+            else:
+                search_result = {
+                    "answer": result,
+                    "sources": [],  # 全局搜索通常基于社区摘要，sources为空
+                    "metadata": {
+                        "level": level,
+                        "query_time": self.performance_metrics["query_time"]
+                    }
+                }
+
             # 缓存结果
-            self._set_to_cache(cache_key, result)
+            self._set_to_cache(cache_key, search_result)
 
             # 记录性能指标
             self.performance_metrics["total_time"] = time.time() - overall_start
 
-            if not result or result.strip() == "":
-                return "未找到相关信息"
-
             print(f"全局搜索完成，耗时: {self.performance_metrics['total_time']:.2f}s")
-            return result
+            return search_result
 
         except Exception as e:
             print(f"全局搜索失败: {e}")
             self.error_stats["query_errors"] += 1
             self.performance_metrics["total_time"] = time.time() - overall_start
 
-            return f"搜索过程中出现问题: {str(e)}"
+            return {
+                "answer": f"搜索过程中出现问题: {str(e)}",
+                "sources": [],
+                "metadata": {"error": True}
+            }
     
     def search_with_details(self, query_input: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
         """

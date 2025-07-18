@@ -11,7 +11,7 @@ import time
 from model.get_models import get_llm_model, get_embeddings_model
 from config.neo4jdb import get_db_manager
 from search_new.config import get_search_config
-from search_new.utils.cache_manager import CacheManager, MemoryCacheBackend, DiskCacheBackend
+from CacheManage import CacheManager, ContextAwareCacheKeyStrategy, HybridCacheBackend
 
 class BaseSearch(ABC):
     """
@@ -89,29 +89,16 @@ class BaseSearch(ABC):
             # 使用配置中的缓存目录或传入的目录
             if cache_dir is None:
                 cache_dir = self.config.cache.base_cache_dir
-            
-            # 创建缓存后端
-            memory_backend = None
-            disk_backend = None
-            
-            if self.config.cache.memory_cache_enabled:
-                memory_backend = MemoryCacheBackend(
-                    max_size=self.config.cache.max_cache_size,
-                    default_ttl=self.config.cache.cache_ttl
-                )
-            
-            if self.config.cache.disk_cache_enabled:
-                disk_backend = DiskCacheBackend(
-                    cache_dir=cache_dir,
-                    default_ttl=self.config.cache.cache_ttl
-                )
-            
-            # 创建缓存管理器
+
+            # 创建缓存管理器，使用项目原有的CacheManage模块
             self.cache_manager = CacheManager(
-                memory_backend=memory_backend,
-                disk_backend=disk_backend,
-                use_memory=self.config.cache.memory_cache_enabled,
-                use_disk=self.config.cache.disk_cache_enabled
+                key_strategy=ContextAwareCacheKeyStrategy(),
+                storage_backend=HybridCacheBackend(
+                    cache_dir=cache_dir,
+                    memory_max_size=self.config.cache.max_cache_size,
+                    disk_max_size=self.config.cache.max_cache_size * 5
+                ),
+                cache_dir=cache_dir
             )
             
         except Exception as e:
@@ -166,7 +153,8 @@ class BaseSearch(ABC):
             
         try:
             start_time = time.time()
-            success = self.cache_manager.set(cache_key, value, ttl)
+            self.cache_manager.set(cache_key, value)
+            success = True
             self.performance_metrics["cache_time"] += time.time() - start_time
             
             if success:

@@ -6,10 +6,11 @@
 
 from typing import Dict, List, Any, Optional
 import time
+import re
 from dataclasses import dataclass, field
 
 from search_new.reasoning.utils.nlp_utils import extract_entities, clean_text
-from search_new.reasoning.utils.prompts import get_prompt
+from graph.extraction.entity_extractor import EntityRelationExtractor
 
 
 @dataclass
@@ -60,29 +61,31 @@ class KnowledgeGraphBuilder:
     4. 图谱合并和更新
     """
     
-    def __init__(self, llm=None):
+    def __init__(self, llm=None, entity_extractor=None):
         """
         初始化知识图谱构建器
-        
+
         参数:
             llm: 大语言模型实例，用于实体和关系抽取
+            entity_extractor: 项目原有的实体关系提取器
         """
         self.llm = llm
-        
+
+        self.entity_extractor = entity_extractor
         # 构建配置
         self.entity_confidence_threshold = 0.7
         self.relation_confidence_threshold = 0.6
         self.max_entities_per_text = 50
         self.max_relations_per_text = 100
-        
+
         # 知识图谱存储
         self.knowledge_graphs: Dict[str, KnowledgeGraph] = {}
         self.current_graph_id: Optional[str] = None
-        
+
         # 实体和关系缓存
         self.entity_cache: Dict[str, KGEntity] = {}
         self.relation_cache: Dict[str, KGRelation] = {}
-        
+
         print("知识图谱构建器初始化完成")
     
     def create_knowledge_graph(self, graph_id: Optional[str] = None) -> str:
@@ -159,41 +162,37 @@ class KnowledgeGraphBuilder:
             return []
     
     def _extract_entities_with_llm(self, text: str, source: str) -> List[KGEntity]:
-        """使用LLM进行实体抽取"""
+        """使用项目原有的实体关系提取器进行实体抽取"""
         try:
-            prompt = get_prompt("entity_recognition", text=text)
-            if not prompt:
+            if not self.entity_extractor:
                 return []
-            
-            response = self.llm.invoke([{"role": "user", "content": prompt}])
-            
-            # 解析LLM响应（简化版本）
+
+            # 使用项目原有的实体关系提取器
+            result = self.entity_extractor._process_single_chunk(text)
+
             entities = []
-            lines = response.content.split('\n') if hasattr(response, 'content') else str(response).split('\n')
-            
-            current_type = None
-            for line in lines:
-                line = line.strip()
-                if line.endswith('：'):
-                    current_type = line[:-1]
-                elif line and current_type:
-                    entity_names = [name.strip() for name in line.split('、') if name.strip()]
-                    for name in entity_names:
-                        entity_id = f"{current_type}_{hash(name) % 10000}"
-                        entity = KGEntity(
-                            entity_id=entity_id,
-                            entity_type=current_type,
-                            name=name,
-                            description=f"{current_type}: {name}",
-                            confidence=0.9,  # LLM识别的置信度更高
-                            source=source
-                        )
-                        entities.append(entity)
-            
+            if result:
+                # 解析实体提取结果，按照原有代码的模式
+                entity_pattern = re.compile(r'\("entity" : "(.+?)" : "(.+?)" : "(.+?)"\)')
+                matches = entity_pattern.findall(result)
+
+                for match in matches:
+                    entity_id, entity_type, description = match
+
+                    entity = KGEntity(
+                        entity_id=entity_id,
+                        entity_type=entity_type,
+                        name=entity_id,  # 使用entity_id作为name
+                        description=description,
+                        confidence=0.9,  # 使用原有提取器的置信度更高
+                        source=source
+                    )
+                    entities.append(entity)
+
             return entities
-            
+
         except Exception as e:
-            print(f"LLM实体抽取失败: {e}")
+            print(f"实体抽取失败: {e}")
             return []
     
     def extract_relations_from_text(self, text: str, entities: List[KGEntity], 
@@ -243,45 +242,41 @@ class KnowledgeGraphBuilder:
             print(f"关系抽取失败: {e}")
             return []
     
-    def _extract_relations_with_llm(self, text: str, entity_names: List[str], 
+    def _extract_relations_with_llm(self, text: str, entity_names: List[str],
                                    source: str) -> List[KGRelation]:
-        """使用LLM进行关系抽取"""
+        """使用项目原有的实体关系提取器进行关系抽取"""
         try:
-            prompt = get_prompt("relation_extraction", 
-                              text=text, 
-                              entities=", ".join(entity_names))
-            if not prompt:
+            if not self.entity_extractor:
                 return []
-            
-            response = self.llm.invoke([{"role": "user", "content": prompt}])
-            
-            # 解析LLM响应
+
+            # 使用项目原有的实体关系提取器
+            result = self.entity_extractor._process_single_chunk(text)
+
             relations = []
-            lines = response.content.split('\n') if hasattr(response, 'content') else str(response).split('\n')
-            
-            for line in lines:
-                line = line.strip()
-                if ' - ' in line:
-                    parts = line.split(' - ')
-                    if len(parts) == 3:
-                        source_entity, relation_type, target_entity = parts
-                        
-                        relation_id = f"rel_{hash(line) % 10000}"
-                        relation = KGRelation(
-                            relation_id=relation_id,
-                            source_entity=source_entity.strip(),
-                            target_entity=target_entity.strip(),
-                            relation_type=relation_type.strip(),
-                            description=line,
-                            confidence=0.8,
-                            source=source
-                        )
-                        relations.append(relation)
-            
+            if result:
+                # 解析关系提取结果，按照原有代码的模式
+                relation_pattern = re.compile(r'\("relationship" : "(.+?)" : "(.+?)" : "(.+?)" : "(.+?)" : (.+?)\)')
+                matches = relation_pattern.findall(result)
+
+                for match in matches:
+                    source_entity, target_entity, relation_type, description, weight = match
+                    relation_id = f"rel_{hash(f'{source_entity}_{relation_type}_{target_entity}') % 10000}"
+
+                    relation = KGRelation(
+                        relation_id=relation_id,
+                        source_entity=source_entity.strip(),
+                        target_entity=target_entity.strip(),
+                        relation_type=relation_type.strip(),
+                        description=description.strip(),
+                        confidence=float(weight) if weight.replace('.', '').isdigit() else 0.8,
+                        source=source
+                    )
+                    relations.append(relation)
+
             return relations
-            
+
         except Exception as e:
-            print(f"LLM关系抽取失败: {e}")
+            print(f"关系抽取失败: {e}")
             return []
     
     def build_knowledge_graph_from_text(self, text: str, source: str = "", 
