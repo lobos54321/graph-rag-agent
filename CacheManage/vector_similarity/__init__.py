@@ -1,8 +1,15 @@
 from .matcher import VectorSimilarityMatcher
-from .embeddings import EmbeddingProvider, SentenceTransformerEmbedding
+from .embeddings import (
+    EmbeddingProvider,
+    SentenceTransformerEmbedding,
+    OpenAIEmbeddingProvider,
+    get_cache_embedding_provider
+)
 
 __all__ = [
     'VectorSimilarityMatcher',
     'EmbeddingProvider',
-    'SentenceTransformerEmbedding'
+    'SentenceTransformerEmbedding',
+    'OpenAIEmbeddingProvider',
+    'get_cache_embedding_provider'
 ]

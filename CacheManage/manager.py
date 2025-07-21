@@ -1,12 +1,18 @@
 import time
+import os
 from typing import Any, Dict, Optional, Callable
+from pathlib import Path
 
 from .strategies import CacheKeyStrategy, SimpleCacheKeyStrategy, ContextAwareCacheKeyStrategy, ContextAndKeywordAwareCacheKeyStrategy
 from .backends import CacheStorageBackend, MemoryCacheBackend, HybridCacheBackend, ThreadSafeCacheBackend
 from .models import CacheItem
-from .vector_similarity import VectorSimilarityMatcher
+from .vector_similarity import VectorSimilarityMatcher, get_cache_embedding_provider
 
 from config.settings import similarity_threshold as st
+from dotenv import load_dotenv
+
+# 加载环境变量
+load_dotenv()
 
 
 class CacheManager:
@@ -53,8 +59,17 @@ class CacheManager:
         # 向量相似性匹配器
         self.enable_vector_similarity = enable_vector_similarity
         if enable_vector_similarity:
+            # 确保缓存目录存在
+            Path(cache_dir).mkdir(parents=True, exist_ok=True)
+
+            # 创建向量索引文件路径
             vector_index_file = f"{cache_dir}/vector_index" if not memory_only else None
+
+            # 获取配置的嵌入提供者
+            embedding_provider = get_cache_embedding_provider()
+
             self.vector_matcher = VectorSimilarityMatcher(
+                embedding_provider=embedding_provider,
                 similarity_threshold=similarity_threshold,
                 max_vectors=max_vectors,
                 index_file=vector_index_file

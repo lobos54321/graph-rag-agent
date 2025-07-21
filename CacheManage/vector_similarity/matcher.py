@@ -3,29 +3,29 @@ import pickle
 import os
 import threading
 from typing import List, Tuple, Dict, Any
-from .embeddings import EmbeddingProvider, SentenceTransformerEmbedding
+from .embeddings import EmbeddingProvider, get_cache_embedding_provider
 
 from config.settings import similarity_threshold as st
 
 
 class VectorSimilarityMatcher:
     """向量相似性匹配器，支持基于向量相似度的缓存匹配"""
-    
-    def __init__(self, 
+
+    def __init__(self,
                  embedding_provider: EmbeddingProvider = None,
                  similarity_threshold: float = st,
                  max_vectors: int = 10000,
                  index_file: str = None):
         """
         初始化向量相似性匹配器
-        
+
         参数:
-            embedding_provider: 嵌入向量提供者
+            embedding_provider: 嵌入向量提供者，如果为None则根据配置自动选择
             similarity_threshold: 相似度阈值
             max_vectors: 最大向量数量
             index_file: 索引文件路径
         """
-        self.embedding_provider = embedding_provider or SentenceTransformerEmbedding()
+        self.embedding_provider = embedding_provider or get_cache_embedding_provider()
         self.similarity_threshold = similarity_threshold
         self.max_vectors = max_vectors
         self.index_file = index_file
@@ -53,24 +53,24 @@ class VectorSimilarityMatcher:
             # 如果已存在，先删除
             if cache_key in self.key_to_index:
                 self.remove_vector(cache_key)
-            
+
             # 生成嵌入向量
             embedding = self.embedding_provider.encode(query)
             if embedding.ndim == 1:
                 embedding = embedding.reshape(1, -1)
-            
+
             # 添加到FAISS索引
             faiss_index = self._next_index
             self.index.add(embedding)
-            
+
             # 更新映射
             self.key_to_index[cache_key] = faiss_index
             self.index_to_key[faiss_index] = cache_key
             self.key_to_context[cache_key] = context_info or {}
             self.key_to_query[cache_key] = query
-            
+
             self._next_index += 1
-            
+
             # 检查是否超出最大容量
             if self._next_index > self.max_vectors:
                 self._cleanup_old_vectors()
@@ -80,28 +80,28 @@ class VectorSimilarityMatcher:
         with self._lock:
             if self.index.ntotal == 0:
                 return []
-            
+
             # 生成查询向量
             query_embedding = self.embedding_provider.encode(query)
             if query_embedding.ndim == 1:
                 query_embedding = query_embedding.reshape(1, -1)
-            
+
             # 搜索相似向量
             scores, indices = self.index.search(query_embedding, min(top_k * 2, self.index.ntotal))
-            
+
             results = []
             for score, idx in zip(scores[0], indices[0]):
                 if idx == -1 or idx >= len(self.index_to_key):
                     continue
-                    
+
                 if idx in self.index_to_key:
                     cache_key = self.index_to_key[idx]
-                    
+
                     # 检查上下文匹配
                     if self._context_matches(context_info, self.key_to_context.get(cache_key, {})):
                         if score >= self.similarity_threshold:
                             results.append((cache_key, float(score)))
-            
+
             # 按相似度排序
             results.sort(key=lambda x: x[1], reverse=True)
             return results[:top_k]

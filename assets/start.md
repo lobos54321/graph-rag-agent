@@ -61,27 +61,35 @@ textract==1.6.3  # Windows 无需安装
 在项目根目录下创建 `.env` 文件，示例如下：
 
 ```env
-# One-API 配置
-OPENAI_API_KEY='你的 one-api 令牌'
-OPENAI_BASE_URL='http://localhost:13000/v1'
+OPENAI_API_KEY = 'sk-xxx'  # api-key
+OPENAI_BASE_URL = 'http://localhost:13000/v1' # url
 
-# 模型配置
-OPENAI_EMBEDDINGS_MODEL='嵌入模型名称'
-OPENAI_LLM_MODEL='LLM 模型名称'
-TEMPERATURE=0
-MAX_TOKENS=2000
-VERBOSE=True
+OPENAI_EMBEDDINGS_MODEL = 'text-embedding-3-large'  # 向量嵌入模型
+OPENAI_LLM_MODEL = 'gpt-4o'  # 对话模型
 
-# Neo4j 配置
+TEMPERATURE = 0   # 模型发散度，0-1，越大回答越天马行空
+MAX_TOKENS = 2000  # 最大token
+
+VERBOSE = True  # 调试模式
+
+# neo4j 配置
 NEO4J_URI='neo4j://localhost:7687'
 NEO4J_USERNAME='neo4j'
 NEO4J_PASSWORD='12345678'
 
+# 缓存向量相似度匹配配置
+# 可选值: 'openai' (复用RAG的向量模型), 'sentence_transformer' (使用本地模型)
+CACHE_EMBEDDING_PROVIDER = 'openai'
+# 当使用sentence_transformer时的模型名，模型会缓存到 ./cache/model 目录
+CACHE_SENTENCE_TRANSFORMER_MODEL = 'all-MiniLM-L6-v2'
+# 模型缓存配置
+MODEL_CACHE_ROOT = './cache'  # 缓存根目录，模型会保存到 {MODEL_CACHE_ROOT}/model
+
 # LangSmith 配置（可选，若不需要此监控，可以直接注释）
 LANGSMITH_TRACING=true
 LANGSMITH_ENDPOINT="https://api.smith.langchain.com"
-LANGSMITH_API_KEY="你的 LangSmith API Key"
-LANGSMITH_PROJECT="项目名称"
+LANGSMITH_API_KEY="xxx"
+LANGSMITH_PROJECT="xxx"
 ```
 
 **注意**：全流程测试通过的只有deepseek（20241226版本）以及gpt-4o，剩下的模型，比如deepseek（20250324版本）幻觉问题比较严重，有概率不遵循提示词，导致抽取实体失败；Qwen的模型可以抽取实体，但是好像不支持langchain/langgraph，所以问答的时候有概率报错，他们有自己的agent实现[Qwen-Agent](https://qwen.readthedocs.io/zh-cn/latest/framework/qwen_agent.html)
