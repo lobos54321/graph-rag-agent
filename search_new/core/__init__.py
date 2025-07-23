@@ -1,15 +1,9 @@
-"""
-搜索核心模块
+# 核心搜索模块初始化文件
 
-提供基础搜索功能的实现
-"""
-
-from .base_search import BaseSearch
-from .local_search import LocalSearch
-from .global_search import GlobalSearch
+from search_new.core.local_search import LocalSearch
+from search_new.core.global_search import GlobalSearch
 
 __all__ = [
-    "BaseSearch",
     "LocalSearch",
     "GlobalSearch"
 ]

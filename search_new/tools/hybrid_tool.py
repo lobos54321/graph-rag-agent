@@ -1,123 +1,94 @@
-"""
-混合搜索工具
-
-结合本地搜索和全局搜索的混合策略，参考lightrag的双级检索思想
-"""
-
-from typing import List, Dict, Any, Union
 import time
 import json
+from typing import List, Dict, Any
+import pandas as pd
+from neo4j import Result
 
+from langchain_core.tools import BaseTool
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-from search_new.tools.base_tool import BaseSearchTool
-from search_new.tools.local_tool import LocalSearchTool
-from search_new.tools.global_tool import GlobalSearchTool
+from config.prompt import LC_SYSTEM_PROMPT
+from config.settings import gl_description, response_type
+from search_new.tools.base import BaseSearchTool
+from search_new.config.search_config import search_config
 
 
 class HybridSearchTool(BaseSearchTool):
-    """混合搜索工具，结合本地搜索和全局搜索的优势"""
+    """
+    混合搜索工具，实现类似LightRAG的双级检索策略
+    结合了局部细节检索和全局主题检索
+    """
     
     def __init__(self):
         """初始化混合搜索工具"""
-        # 先初始化基类以获取config
-        super().__init__()
-        # 然后设置特定的缓存目录
-        if hasattr(self, 'cache_manager') and self.cache_manager:
-            self.cache_manager.cache_dir = f"{self.config.cache.base_cache_dir}/hybrid_search"
+        # 检索参数
+        self.entity_limit = 15        # 最大检索实体数量
+        self.max_hop_distance = 2     # 最大跳数（关系扩展）
+        self.top_communities = 3      # 检索社区数量
+        self.batch_size = 10          # 批处理大小
+        self.community_level = 0      # 默认社区等级
         
-        # 创建子搜索工具
-        self.local_tool = LocalSearchTool()
-        self.global_tool = GlobalSearchTool()
-        
-        # 混合搜索配置
-        self.local_weight = 0.6  # 本地搜索权重
-        self.global_weight = 0.4  # 全局搜索权重
-        self.enable_parallel = True  # 是否并行执行搜索
-        
-        print("混合搜索工具初始化完成")
+        # 调用父类构造函数
+        super().__init__(cache_dir=search_config.get_cache_dir("base"))
+
+        # 设置处理链
+        self._setup_chains()
     
     def _setup_chains(self):
         """设置处理链"""
-        try:
-            # 设置关键词提取链
-            self._setup_keyword_chain()
-            
-            # 设置结果融合链
-            self._setup_fusion_chain()
-            
-            # 设置查询分类链
-            self._setup_classification_chain()
-            
-        except Exception as e:
-            print(f"处理链设置失败: {e}")
-            raise
-    
-    def _setup_keyword_chain(self):
-        """设置关键词提取链"""
-        keyword_prompt = ChatPromptTemplate.from_template("""
-        请从以下查询中提取关键词，分为低级关键词（具体实体、人名、地名等）和高级关键词（概念、主题等）。
-        混合搜索需要同时考虑具体实体和抽象概念。
+        # 创建主查询处理链 - 用于生成最终答案
+        self.query_prompt = ChatPromptTemplate.from_messages([
+            ("system", LC_SYSTEM_PROMPT),
+            ("human", """
+                ---分析报告--- 
+                请注意，以下内容组合了低级详细信息和高级主题概念。
 
-        查询: {query}
+                ## 低级内容（实体详细信息）:
+                {low_level}
+                
+                ## 高级内容（主题和概念）:
+                {high_level}
 
-        请以JSON格式返回结果：
-        {{
-            "low_level": ["关键词1", "关键词2"],
-            "high_level": ["概念1", "概念2"]
-        }}
-        """)
+                用户的问题是：
+                {query}
+                
+                请综合利用上述信息回答问题，确保回答全面且有深度。
+                回答格式应包含：
+                1. 主要内容（使用清晰的段落展示）
+                2. 在末尾标明引用的数据来源
+                """
+            )
+        ])
         
-        self.keyword_chain = keyword_prompt | self.llm | StrOutputParser()
-    
-    def _setup_fusion_chain(self):
-        """设置结果融合链"""
-        fusion_prompt = ChatPromptTemplate.from_template("""
-        请将以下本地搜索和全局搜索的结果融合成一个完整、连贯的答案。
-
-        用户问题: {query}
-
-        本地搜索结果（侧重具体细节）:
-        {local_result}
-
-        全局搜索结果（侧重整体概念）:
-        {global_result}
-
-        请融合这两个结果，生成一个既包含具体细节又有整体视角的完整答案。
-        请按以下格式输出：
-        1. 使用三级标题(###)标记主题
-        2. 主要内容用清晰的段落展示
-        3. 最后必须用"#### 引用数据"标记引用部分，列出用到的数据来源
-        """)
+        # 链接到LLM
+        self.query_chain = self.query_prompt | self.llm | StrOutputParser()
         
-        self.fusion_chain = fusion_prompt | self.llm | StrOutputParser()
-    
-    def _setup_classification_chain(self):
-        """设置查询分类链"""
-        classification_prompt = ChatPromptTemplate.from_template("""
-        请分析以下查询的类型，判断更适合使用本地搜索还是全局搜索，或者两者结合。
-
-        查询: {query}
-
-        请以JSON格式返回结果：
-        {{
-            "search_strategy": "local|global|hybrid",
-            "confidence": 0.8,
-            "reasoning": "选择理由"
-        }}
-
-        判断标准：
-        - local: 查询涉及具体实体、详细信息、特定事实
-        - global: 查询涉及概念性问题、需要整体视角、跨领域分析
-        - hybrid: 查询既需要具体细节又需要整体理解
-        """)
+        # 关键词提取链
+        self.keyword_prompt = ChatPromptTemplate.from_messages([
+            ("system", """你是一个专门从用户查询中提取搜索关键词的助手。你需要将关键词分为两类：
+                1. 低级关键词：具体实体名称、人物、地点、具体事件等
+                2. 高级关键词：主题、概念、关系类型等
+                
+                返回格式必须是JSON格式：
+                {{
+                    "low_level": ["关键词1", "关键词2", ...], 
+                    "high_level": ["关键词1", "关键词2", ...]
+                }}
+                
+                注意：
+                - 每类提取3-5个关键词即可
+                - 不要添加任何解释或其他文本，只返回JSON
+                - 如果某类无关键词，则返回空列表
+                """),
+            ("human", "{query}")
+        ])
         
-        self.classification_chain = classification_prompt | self.llm | StrOutputParser()
+        self.keyword_chain = self.keyword_prompt | self.llm | StrOutputParser()
     
     def extract_keywords(self, query: str) -> Dict[str, List[str]]:
         """
-        从查询中提取关键词
+        从查询中提取双级关键词
         
         参数:
             query: 查询字符串
@@ -126,26 +97,66 @@ class HybridSearchTool(BaseSearchTool):
             Dict[str, List[str]]: 分类关键词字典
         """
         # 检查缓存
-        cache_key = f"hybrid_keywords:{query}"
-        cached_keywords = self._get_from_cache(cache_key)
+        cached_keywords = self.cache_manager.get(f"keywords:{query}")
         if cached_keywords:
             return cached_keywords
-        
+            
         try:
-            start_time = time.time()
+            llm_start = time.time()
             
             # 调用LLM提取关键词
             result = self.keyword_chain.invoke({"query": query})
             
-            # 记录处理时间
-            self.performance_metrics["keyword_time"] += time.time() - start_time
+            print(f"DEBUG - LLM关键词结果: {result[:100]}...") if len(str(result)) > 100 else print(f"DEBUG - LLM关键词结果: {result}")
             
             # 解析JSON结果
             try:
-                keywords = json.loads(result)
-            except json.JSONDecodeError:
-                print(f"关键词提取结果解析失败: {result}")
-                keywords = {"low_level": [], "high_level": []}
+                # 尝试直接解析
+                if isinstance(result, dict):
+                    # 结果已经是字典，无需解析
+                    keywords = result
+                elif isinstance(result, str):
+                    # 清理字符串，移除可能导致解析失败的字符
+                    result = result.strip()
+                    # 检查字符串是否以JSON格式开始
+                    if result.startswith('{') and result.endswith('}'):
+                        keywords = json.loads(result)
+                    else:
+                        # 尝试提取JSON部分 - 寻找第一个{和最后一个}
+                        start_idx = result.find('{')
+                        end_idx = result.rfind('}')
+                        if start_idx != -1 and end_idx != -1 and start_idx < end_idx:
+                            json_str = result[start_idx:end_idx+1]
+                            keywords = json.loads(json_str)
+                        else:
+                            # 没有有效的JSON结构，使用简单的关键词提取
+                            raise ValueError("No valid JSON structure found")
+                else:
+                    # 不是字符串也不是字典
+                    raise TypeError(f"Unexpected result type: {type(result)}")
+                    
+            except (json.JSONDecodeError, ValueError, TypeError) as json_err:
+                print(f"JSON解析失败: {json_err}，尝试备用方法提取关键词")
+                
+                # 备用方法：手动提取关键词
+                if isinstance(result, str):
+                    # 简单分词提取关键词
+                    import re
+                    # 移除标点符号，按空格分词
+                    words = re.findall(r'\b\w+\b', query.lower())
+                    # 过滤停用词（简化版，实际需要更完整的停用词表）
+                    stopwords = {"a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+                                "in", "on", "at", "to", "for", "with", "by", "about", "of", "and", "or"}
+                    keywords = {
+                        "high_level": [word for word in words if len(word) > 5 and word not in stopwords][:3],
+                        "low_level": [word for word in words if 2 < len(word) <= 5 and word not in stopwords][:3]
+                    }
+                else:
+                    # 完全失败，返回空关键词
+                    keywords = {"low_level": [], "high_level": []}
+            
+            # 记录LLM处理时间
+            self.performance_metrics["llm_time"] += time.time() - llm_start
             
             # 确保包含必要的键
             if not isinstance(keywords, dict):
@@ -154,280 +165,298 @@ class HybridSearchTool(BaseSearchTool):
                 keywords["low_level"] = []
             if "high_level" not in keywords:
                 keywords["high_level"] = []
-            
+                
             # 缓存结果
-            self._set_to_cache(cache_key, keywords)
+            self.cache_manager.set(f"keywords:{query}", keywords)
             
             return keywords
             
         except Exception as e:
             print(f"关键词提取失败: {e}")
-            self.error_stats["keyword_errors"] += 1
+            # 返回空关键词
             return {"low_level": [], "high_level": []}
-    
-    def _classify_query(self, query: str) -> Dict[str, Any]:
+
+    def _retrieve_low_level_content(self, query: str, keywords: List[str]) -> str:
         """
-        分类查询类型
-        
+        检索低级内容（实体和关系）
+
         参数:
             query: 查询字符串
-            
-        返回:
-            Dict: 分类结果
-        """
-        try:
-            result = self.classification_chain.invoke({"query": query})
-            
-            try:
-                classification = json.loads(result)
-            except json.JSONDecodeError:
-                print(f"查询分类结果解析失败: {result}")
-                classification = {
-                    "search_strategy": "hybrid",
-                    "confidence": 0.5,
-                    "reasoning": "解析失败，使用默认混合策略"
-                }
-            
-            return classification
-            
-        except Exception as e:
-            print(f"查询分类失败: {e}")
-            return {
-                "search_strategy": "hybrid",
-                "confidence": 0.5,
-                "reasoning": f"分类失败: {str(e)}"
-            }
-    
-    def _execute_local_search(self, query: str) -> Dict[str, Any]:
-        """执行本地搜索"""
-        try:
-            return self.local_tool.search(query)
-        except Exception as e:
-            print(f"本地搜索执行失败: {e}")
-            return {
-                "answer": f"本地搜索失败: {str(e)}",
-                "sources": [],
-                "metadata": {"error": True}
-            }
-    
-    def _execute_global_search(self, query: str) -> Dict[str, Any]:
-        """执行全局搜索"""
-        try:
-            return self.global_tool.search(query)
-        except Exception as e:
-            print(f"全局搜索执行失败: {e}")
-            return {
-                "answer": f"全局搜索失败: {str(e)}",
-                "sources": [],
-                "metadata": {"error": True}
-            }
-    
-    def _fuse_results(self, query: str, local_result: str, global_result: str) -> str:
-        """
-        融合搜索结果
-        
-        参数:
-            query: 用户查询
-            local_result: 本地搜索结果
-            global_result: 全局搜索结果
-            
-        返回:
-            str: 融合后的结果
-        """
-        try:
-            # 检查结果有效性
-            if not local_result or "失败" in local_result:
-                return global_result
-            if not global_result or "失败" in global_result:
-                return local_result
-            
-            # 使用融合链生成最终结果
-            fused_result = self.fusion_chain.invoke({
-                "query": query,
-                "local_result": local_result,
-                "global_result": global_result
-            })
-            
-            return fused_result
-            
-        except Exception as e:
-            print(f"结果融合失败: {e}")
-            # 如果融合失败，返回较长的结果
-            if len(local_result) > len(global_result):
-                return local_result
-            else:
-                return global_result
-    
-    def search(self, query_input: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        执行混合搜索
-
-        参数:
-            query_input: 查询输入，可以是字符串或字典
+            keywords: 低级关键词列表
 
         返回:
-            Dict[str, Any]: 包含answer和sources的搜索结果
+            str: 格式化的低级内容
+        """
+        try:
+            # 基于关键词搜索实体
+            entity_ids = []
+
+            # 使用向量搜索
+            if keywords:
+                for keyword in keywords[:5]:  # 限制关键词数量
+                    ids = self.vector_search(keyword, limit=3)
+                    entity_ids.extend(ids)
+
+            # 如果没有找到实体，使用查询本身搜索
+            if not entity_ids:
+                entity_ids = self.vector_search(query, limit=self.entity_limit)
+
+            # 去重并限制数量
+            entity_ids = list(set(entity_ids))[:self.entity_limit]
+
+            if not entity_ids:
+                return "未找到相关实体信息。"
+
+            # 获取实体信息
+            entities = self.get_entity_info(entity_ids)
+
+            # 获取关系信息
+            relationships = self.get_relationships(entity_ids, max_rels=20)
+
+            # 获取相关文本块
+            chunks = self.get_chunks(entity_ids, max_chunks=5)
+
+            # 格式化内容
+            content_parts = []
+
+            if entities:
+                content_parts.append("### 相关实体")
+                for entity in entities:
+                    content_parts.append(f"- {entity.get('id', '')}: {entity.get('description', '')}")
+
+            if relationships:
+                content_parts.append("\n### 相关关系")
+                for rel in relationships:
+                    content_parts.append(f"- {rel.get('description', '')}")
+
+            if chunks:
+                content_parts.append("\n### 相关文档")
+                for chunk in chunks:
+                    content_parts.append(f"- {chunk.get('text', '')[:200]}...")
+
+            return "\n".join(content_parts) if content_parts else "未找到相关的低级内容。"
+
+        except Exception as e:
+            print(f"[{self.tool_name}] 检索低级内容失败: {e}")
+            return "检索低级内容时出现错误。"
+
+    def _retrieve_high_level_content(self, query: str, keywords: List[str]) -> str:
+        """
+        检索高级内容（社区和主题）
+
+        参数:
+            query: 查询字符串
+            keywords: 高级关键词列表
+
+        返回:
+            str: 格式化的高级内容
+        """
+        try:
+            # 基于关键词搜索实体，然后找到相关社区
+            entity_ids = []
+
+            if keywords:
+                for keyword in keywords[:3]:  # 限制关键词数量
+                    ids = self.vector_search(keyword, limit=5)
+                    entity_ids.extend(ids)
+
+            # 如果没有找到实体，使用查询本身搜索
+            if not entity_ids:
+                entity_ids = self.vector_search(query, limit=10)
+
+            # 去重
+            entity_ids = list(set(entity_ids))
+
+            if not entity_ids:
+                return "未找到相关社区信息。"
+
+            # 获取社区信息
+            communities = self.get_communities(
+                entity_ids,
+                level=self.community_level,
+                max_communities=self.top_communities
+            )
+
+            # 格式化社区内容
+            content_parts = []
+
+            if communities:
+                content_parts.append("### 相关社区主题")
+                for community in communities:
+                    summary = community.get('summary', '')
+                    if summary:
+                        content_parts.append(f"- {summary}")
+
+            return "\n".join(content_parts) if content_parts else "未找到相关的高级内容。"
+
+        except Exception as e:
+            print(f"[{self.tool_name}] 检索高级内容失败: {e}")
+            return "检索高级内容时出现错误。"
+
+    def search(self, query_input: Any) -> str:
+        """
+        执行混合搜索，结合低级和高级内容
+
+        参数:
+            query_input: 字符串查询或包含查询和关键词的字典
+
+        返回:
+            str: 生成的最终答案
         """
         overall_start = time.time()
-        self._reset_metrics()
-        
+
+        # 解析输入
+        if isinstance(query_input, dict) and "query" in query_input:
+            query = query_input["query"]
+            low_keywords = query_input.get("low_level_keywords", [])
+            high_keywords = query_input.get("high_level_keywords", [])
+        else:
+            query = str(query_input)
+            # 提取关键词
+            keywords = self.extract_keywords(query)
+            low_keywords = keywords.get("low_level", [])
+            high_keywords = keywords.get("high_level", [])
+
+        # 检查缓存
+        cache_key = query
+        if low_keywords or high_keywords:
+            cache_key = f"{query}||low:{','.join(sorted(low_keywords))}||high:{','.join(sorted(high_keywords))}"
+
+        cached_result = self.cache_manager.get(cache_key)
+        if cached_result:
+            return cached_result
+
         try:
-            # 解析查询
-            if isinstance(query_input, dict):
-                query = query_input.get("query", str(query_input))
-                strategy = query_input.get("strategy", None)
-            else:
-                query = str(query_input)
-                strategy = None
-            
-            # 生成缓存键
-            cache_key = self._get_cache_key(query, strategy=strategy)
-            
-            # 检查缓存
-            cached_result = self._get_from_cache(cache_key)
-            if cached_result:
-                print(f"混合搜索缓存命中: {query[:50]}...")
-                # 如果缓存的是字符串，转换为字典格式
-                if isinstance(cached_result, str):
-                    return {
-                        "answer": cached_result,
-                        "sources": [],
-                        "metadata": {"from_cache": True}
-                    }
-                return cached_result
-            
-            print(f"开始混合搜索: {query[:100]}...")
-            
-            # 如果没有指定策略，则自动分类
-            if strategy is None:
-                classification = self._classify_query(query)
-                strategy = classification["search_strategy"]
-                print(f"查询分类结果: {strategy} (置信度: {classification['confidence']})")
-            
-            # 根据策略执行搜索
-            search_start = time.time()
+            # 1. 检索低级内容（实体和关系）
+            low_level_content = self._retrieve_low_level_content(query, low_keywords)
 
-            if strategy == "local":
-                search_result = self._execute_local_search(query)
-            elif strategy == "global":
-                search_result = self._execute_global_search(query)
-            else:  # hybrid
-                # 并行执行本地和全局搜索
-                local_result = self._execute_local_search(query)
-                global_result = self._execute_global_search(query)
+            # 2. 检索高级内容（社区和主题）
+            high_level_content = self._retrieve_high_level_content(query, high_keywords)
 
-                # 融合结果
-                fused_answer = self._fuse_results(query, local_result.get("answer", ""), global_result.get("answer", ""))
+            # 3. 生成最终答案
+            llm_start = time.time()
 
-                # 合并sources
-                all_sources = []
-                all_sources.extend(local_result.get("sources", []))
-                all_sources.extend(global_result.get("sources", []))
+            # 调用LLM生成最终答案
+            result = self.query_chain.invoke({
+                "query": query,
+                "low_level": low_level_content,
+                "high_level": high_level_content,
+                "response_type": response_type
+            })
 
-                search_result = {
-                    "answer": fused_answer,
-                    "sources": all_sources,
-                    "metadata": {
-                        "strategy": "hybrid",
-                        "local_result": local_result,
-                        "global_result": global_result
-                    }
-                }
-
-            self.performance_metrics["query_time"] = time.time() - search_start
-
-            # 确保结果格式正确
-            if not search_result or not search_result.get("answer") or search_result["answer"].strip() == "":
-                search_result = {
-                    "answer": "未找到相关信息",
-                    "sources": [],
-                    "metadata": {"strategy": strategy}
-                }
+            self.performance_metrics["llm_time"] += time.time() - llm_start
 
             # 缓存结果
-            self._set_to_cache(cache_key, search_result)
+            self.cache_manager.set(cache_key, result)
+
+            self.performance_metrics["total_time"] = time.time() - overall_start
+
+            if not result:
+                return "未找到相关信息"
+            return result
+
+        except Exception as e:
+            print(f"[{self.tool_name}] 混合搜索失败: {e}")
+            error_msg = f"搜索过程中出现问题: {str(e)}"
 
             # 记录性能指标
             self.performance_metrics["total_time"] = time.time() - overall_start
 
-            print(f"混合搜索完成，耗时: {self.performance_metrics['total_time']:.2f}s")
-            return search_result
-            
-        except Exception as e:
-            print(f"混合搜索失败: {e}")
-            self.error_stats["query_errors"] += 1
-            self.performance_metrics["total_time"] = time.time() - overall_start
+            return error_msg
 
-            return {
-                "answer": f"搜索过程中出现问题: {str(e)}",
-                "sources": [],
-                "metadata": {"error": True}
-            }
-    
-    def search_with_details(self, query_input: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+    def get_local_tool(self) -> BaseTool:
         """
-        执行混合搜索并返回详细信息
-        
-        参数:
-            query_input: 查询输入
-            
+        获取本地搜索工具实例（仅使用低级内容）
+
         返回:
-            Dict: 包含搜索结果和详细信息的字典
+            BaseTool: 本地搜索工具实例
         """
-        start_time = time.time()
-        
-        try:
-            # 解析查询
-            if isinstance(query_input, dict):
-                query = query_input.get("query", str(query_input))
-            else:
-                query = str(query_input)
-            
-            # 执行搜索
-            result = self.search(query_input)
-            
-            # 获取分类信息
-            classification = self._classify_query(query)
-            
-            # 提取关键词
-            keywords = self.extract_keywords(query)
-            
-            return {
-                "result": result,
-                "query": query,
-                "classification": classification,
-                "keywords": keywords,
-                "local_weight": self.local_weight,
-                "global_weight": self.global_weight,
-                "performance": self.get_performance_metrics(),
-                "error_stats": self.get_error_stats(),
-                "total_time": time.time() - start_time,
-                "tool_name": "HybridSearchTool"
-            }
-            
-        except Exception as e:
-            print(f"详细混合搜索失败: {e}")
-            return {
-                "result": f"搜索失败: {str(e)}",
-                "query": str(query_input),
-                "error": str(e),
-                "performance": self.get_performance_metrics(),
-                "error_stats": self.get_error_stats(),
-                "total_time": time.time() - start_time,
-                "tool_name": "HybridSearchTool"
-            }
-    
-    def close(self):
-        """关闭资源"""
-        try:
-            # 调用父类方法
-            super().close()
-            
-            # 关闭子工具
-            if hasattr(self, 'local_tool'):
-                self.local_tool.close()
-            if hasattr(self, 'global_tool'):
-                self.global_tool.close()
-                
-        except Exception as e:
-            print(f"混合搜索工具关闭失败: {e}")
+        class LocalSearchTool(BaseTool):
+            name : str = "local_retriever"
+            description : str= "用于需要具体细节的查询。检索实体、关系等详细内容。"
+
+            def _run(self_tool, query: Any) -> str:
+                # 设置为仅使用低级内容
+                if isinstance(query, dict) and "query" in query:
+                    original_query = query["query"]
+                    keywords = query.get("keywords", [])
+                    # 转换为低级关键词
+                    low_keywords = keywords
+                    query = {
+                        "query": original_query,
+                        "low_level_keywords": low_keywords,
+                        "high_level_keywords": []  # 不使用高级关键词
+                    }
+                else:
+                    # 提取关键词
+                    keywords = self.extract_keywords(str(query))
+                    query = {
+                        "query": str(query),
+                        "low_level_keywords": keywords.get("low_level", []),
+                        "high_level_keywords": []
+                    }
+
+                return self.search(query)
+
+            def _arun(self_tool, query: Any) -> str:
+                raise NotImplementedError("异步执行未实现")
+
+        return LocalSearchTool()
+
+    def get_global_tool(self) -> BaseTool:
+        """
+        获取全局搜索工具实例（仅使用高级内容）
+
+        返回:
+            BaseTool: 全局搜索工具实例
+        """
+        class GlobalSearchTool(BaseTool):
+            name : str = "global_retriever"
+            description : str= gl_description
+
+            def _run(self_tool, query: Any) -> str:
+                # 设置为仅使用高级内容
+                if isinstance(query, dict) and "query" in query:
+                    original_query = query["query"]
+                    keywords = query.get("keywords", [])
+                    # 转换为高级关键词
+                    high_keywords = keywords
+                    query = {
+                        "query": original_query,
+                        "high_level_keywords": high_keywords,
+                        "low_level_keywords": []  # 不使用低级关键词
+                    }
+                else:
+                    # 提取关键词
+                    keywords = self.extract_keywords(str(query))
+                    query = {
+                        "query": str(query),
+                        "high_level_keywords": keywords.get("high_level", []),
+                        "low_level_keywords": []
+                    }
+
+                return self.search(query)
+
+            def _arun(self_tool, query: Any) -> str:
+                raise NotImplementedError("异步执行未实现")
+
+        return GlobalSearchTool()
+
+    def get_tool(self) -> BaseTool:
+        """
+        获取混合搜索工具实例
+
+        返回:
+            BaseTool: 混合搜索工具实例
+        """
+        class HybridSearchLangChainTool(BaseTool):
+            name: str = "hybrid_search"
+            description: str = "混合搜索工具，结合局部细节和全局主题进行综合查询"
+
+            def _run(self_tool, query: Any) -> str:
+                return self.search(query)
+
+            def _arun(self_tool, query: Any) -> str:
+                raise NotImplementedError("异步执行未实现")
+
+        return HybridSearchLangChainTool()

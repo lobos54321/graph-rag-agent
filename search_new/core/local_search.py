@@ -1,21 +1,17 @@
-"""
-本地搜索实现
-
-基于向量检索的社区内精确查询
-"""
-
-from typing import Dict, Any
-import time
-
+from typing import Dict, Any, List
+import pandas as pd
+from neo4j import Result
 from langchain_community.vectorstores import Neo4jVector
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from config.prompt import LC_SYSTEM_PROMPT
-from search_new.core.base_search import BaseSearch
+from config.neo4jdb import get_db_manager
+from search_new.config.search_config import search_config
+from search_new.utils.search_utils import SearchUtils
 
 
-class LocalSearch(BaseSearch):
+class LocalSearch:
     """
     本地搜索类：使用Neo4j和LangChain实现基于向量检索的本地搜索功能
     
@@ -26,65 +22,211 @@ class LocalSearch(BaseSearch):
     3. 使用LLM生成最终答案
     """
     
-    def __init__(self,
-                 llm=None,
-                 embeddings=None,
-                 response_type: str = "多个段落",
-                 enable_cache: bool = True):
+    def __init__(self, llm=None, embeddings=None, response_type: str = None):
         """
         初始化本地搜索类
-
+        
         参数:
-            llm: 大语言模型实例
-            embeddings: 嵌入模型实例
-            response_type: 响应类型
-            enable_cache: 是否启用缓存
+            llm: 大语言模型实例，如果为None则从模型管理器获取
+            embeddings: 向量嵌入模型，如果为None则从模型管理器获取
+            response_type: 响应类型，如果为None则使用配置中的默认值
         """
-        super().__init__(
-            llm=llm,
-            embeddings=embeddings,
-            cache_dir=None,  # 将在父类中设置
-            enable_cache=enable_cache
-        )
+        # 初始化模型
+        if llm is None:
+            from model.get_models import get_llm_model
+            llm = get_llm_model()
+        if embeddings is None:
+            from model.get_models import get_embeddings_model
+            embeddings = get_embeddings_model()
+            
+        self.llm = llm
+        self.embeddings = embeddings
         
-        # 搜索配置
-        self.response_type = response_type
-        self.local_config = self.config.local_search
-
-        # 设置缓存目录（如果启用缓存且父类没有设置）
-        if enable_cache and (not hasattr(self, 'cache_manager') or self.cache_manager is None):
-            self._setup_cache(self.config.cache.local_search_cache_dir)
+        # 设置响应类型
+        self.response_type = response_type or search_config.get_response_type()
         
-        # 检索参数
-        self.top_entities = self.local_config.top_entities
-        self.top_chunks = self.local_config.top_chunks
-        self.top_communities = self.local_config.top_communities
-        self.top_outside_rels = self.local_config.top_outside_rels
-        self.top_inside_rels = self.local_config.top_inside_rels
-        self.index_name = self.local_config.index_name
+        # 获取数据库连接管理器
+        db_manager = get_db_manager()
+        self.driver = db_manager.get_driver()
+        self.neo4j_uri = db_manager.neo4j_uri
+        self.neo4j_username = db_manager.neo4j_username
+        self.neo4j_password = db_manager.neo4j_password
         
-        # 检索查询模板
-        self.retrieval_query = self.local_config.retrieval_query
+        # 从配置加载检索参数
+        self._load_search_config()
         
-        # 数据库连接信息
-        self.neo4j_uri = self.db_manager.neo4j_uri
-        self.neo4j_username = self.db_manager.neo4j_username
-        self.neo4j_password = self.db_manager.neo4j_password
-        
-        print(f"本地搜索初始化完成，配置: top_entities={self.top_entities}")
+        # 初始化社区节点权重
+        self._init_community_weights()
     
-    def _build_final_query(self) -> str:
-        """构建最终的检索查询"""
-        return self.retrieval_query.replace("$topChunks", str(self.top_chunks))\
+    def _load_search_config(self):
+        """从配置加载搜索参数"""
+        local_config = search_config.get_local_search_config()
+        
+        self.top_chunks = local_config.get("top_chunks", 10)
+        self.top_communities = local_config.get("top_communities", 2)
+        self.top_outside_rels = local_config.get("top_outside_rels", 10)
+        self.top_inside_rels = local_config.get("top_inside_rels", 10)
+        self.top_entities = local_config.get("top_entities", 10)
+        self.index_name = local_config.get("index_name", "vector")
+    
+    def _init_community_weights(self):
+        """初始化社区节点权重"""
+        try:
+            # 获取数据库管理器并执行查询
+            db_manager = get_db_manager()
+            result = db_manager.execute_query("""
+                MATCH (n:__Community__)
+                SET n.community_rank = coalesce(n.weight, 0)
+                RETURN count(n) as updated_count
+            """)
+            
+            if not result.empty:
+                updated_count = result.iloc[0]['updated_count']
+                print(f"[LocalSearch] 已更新 {updated_count} 个社区节点的权重")
+
+        except Exception as e:
+            print(f"[LocalSearch] 初始化社区权重失败: {e}")
+
+    @property
+    def retrieval_query(self) -> str:
+        """
+        获取Neo4j检索查询语句
+
+        返回:
+            str: Cypher查询语句，用于检索相关内容
+        """
+        return """
+        WITH collect(node) as nodes
+        WITH
+        collect {
+            UNWIND nodes as n
+            MATCH (n)<-[:MENTIONS]-(c:__Chunk__)
+            WITH distinct c, count(distinct n) as freq
+            RETURN {id:c.id, text: c.text} AS chunkText
+            ORDER BY freq DESC
+            LIMIT $topChunks
+        } AS text_mapping,
+        collect {
+            UNWIND nodes as n
+            MATCH (n)-[:IN_COMMUNITY]->(c:__Community__)
+            WITH distinct c, c.community_rank as rank, c.weight AS weight
+            RETURN c.summary
+            ORDER BY rank, weight DESC
+            LIMIT $topCommunities
+        } AS report_mapping,
+        collect {
+            UNWIND nodes as n
+            MATCH (n)-[r]-(m:__Entity__)
+            WHERE NOT m IN nodes
+            RETURN r.description AS descriptionText
+            ORDER BY r.weight DESC
+            LIMIT $topOutsideRels
+        } as outsideRels,
+        collect {
+            UNWIND nodes as n
+            MATCH (n)-[r]-(m:__Entity__)
+            WHERE m IN nodes
+            RETURN r.description AS descriptionText
+            ORDER BY r.weight DESC
+            LIMIT $topInsideRels
+        } as insideRels,
+        collect {
+            UNWIND nodes as n
+            RETURN n.description AS descriptionText
+        } as entities
+        RETURN {
+            Chunks: text_mapping,
+            Reports: report_mapping,
+            Relationships: outsideRels + insideRels,
+            Entities: entities
+        } AS text, 1.0 AS score, {} AS metadata
+        """
+    
+    def as_retriever(self, **kwargs):
+        """
+        返回检索器实例，用于链式调用
+        
+        参数:
+            **kwargs: 额外的检索参数
+            
+        返回:
+            检索器实例
+        """
+        # 生成包含所有检索参数的查询
+        final_query = self.retrieval_query.replace("$topChunks", str(self.top_chunks))\
             .replace("$topCommunities", str(self.top_communities))\
             .replace("$topOutsideRels", str(self.top_outside_rels))\
             .replace("$topInsideRels", str(self.top_inside_rels))
+
+        # 初始化向量存储
+        vector_store = Neo4jVector.from_existing_index(
+            self.embeddings,
+            url=self.neo4j_uri,
+            username=self.neo4j_username,
+            password=self.neo4j_password,
+            index_name=self.index_name,
+            retrieval_query=final_query
+        )
+        
+        # 返回检索器
+        return vector_store.as_retriever(
+            search_kwargs={"k": self.top_entities, **kwargs}
+        )
     
-    def _create_vector_store(self) -> Neo4jVector:
-        """创建向量存储实例"""
-        try:
-            final_query = self._build_final_query()
+    def search(self, query: str, **kwargs) -> str:
+        """
+        执行本地搜索
+        
+        参数:
+            query: 搜索查询字符串
+            **kwargs: 额外的搜索参数
             
+        返回:
+            str: 生成的最终答案
+        """
+        # 清理查询
+        query = SearchUtils.clean_search_query(query)
+        
+        # 初始化对话提示模板
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", LC_SYSTEM_PROMPT),
+            ("human", """
+                ---分析报告--- 
+                请注意，下面提供的分析报告按**重要性降序排列**。
+
+                {context}
+
+                用户的问题是：
+                {input}
+
+                请按以下格式输出回答：
+                1. 使用三级标题(###)标记主题
+                2. 主要内容用清晰的段落展示
+                3. 最后必须用"#### 引用数据"标记引用部分，列出用到的数据来源
+                """
+             )
+        ])
+        
+        # 创建搜索链
+        chain = prompt | self.llm | StrOutputParser()
+        
+        # 构建检索查询参数
+        search_params = {
+            "topChunks": self.top_chunks,
+            "topCommunities": self.top_communities,
+            "topOutsideRels": self.top_outside_rels,
+            "topInsideRels": self.top_inside_rels,
+        }
+        search_params.update(kwargs)
+        
+        try:
+            # 生成包含所有检索参数的查询
+            final_query = self.retrieval_query.replace("$topChunks", str(self.top_chunks))\
+                .replace("$topCommunities", str(self.top_communities))\
+                .replace("$topOutsideRels", str(self.top_outside_rels))\
+                .replace("$topInsideRels", str(self.top_inside_rels))
+
+            # 初始化向量存储
             vector_store = Neo4jVector.from_existing_index(
                 self.embeddings,
                 url=self.neo4j_uri,
@@ -93,80 +235,129 @@ class LocalSearch(BaseSearch):
                 index_name=self.index_name,
                 retrieval_query=final_query
             )
-            
-            return vector_store
-            
-        except Exception as e:
-            print(f"创建向量存储失败: {e}")
-            raise
-    
-    def as_retriever(self, **kwargs):
-        """
-        返回检索器实例，用于链式调用
-        
-        返回:
-            检索器实例
-        """
-        try:
-            vector_store = self._create_vector_store()
-            
-            return vector_store.as_retriever(
-                search_kwargs={"k": self.top_entities, **kwargs}
-            )
-            
-        except Exception as e:
-            print(f"创建检索器失败: {e}")
-            raise
-    
-    def _similarity_search(self, query: str) -> list:
-        """
-        执行相似度搜索
-        
-        参数:
-            query: 搜索查询
-            
-        返回:
-            list: 搜索结果文档列表
-        """
-        try:
-            vector_store = self._create_vector_store()
-            
+
+            # 执行相似度搜索
             docs = vector_store.similarity_search(
                 query,
-                k=self.top_entities,
-                params={
-                    "topChunks": self.top_chunks,
-                    "topCommunities": self.top_communities,
-                    "topOutsideRels": self.top_outside_rels,
-                    "topInsideRels": self.top_inside_rels,
-                }
+                k=self.top_entities
             )
             
-            return docs
+            # 提取上下文内容
+            if docs:
+                # 处理不同的文档格式
+                if hasattr(docs[0], 'page_content'):
+                    context = docs[0].page_content
+                elif isinstance(docs[0], dict):
+                    context = docs[0].get('page_content', str(docs[0]))
+                else:
+                    context = str(docs[0])
+            else:
+                context = ""
+            
+            # 使用LLM生成响应
+            response = chain.invoke({
+                "context": context,
+                "input": query,
+                "response_type": self.response_type
+            })
+            
+            # 验证搜索结果
+            if not SearchUtils.validate_search_result(response):
+                return "抱歉，未能找到相关信息来回答您的问题。"
+            
+            return response
             
         except Exception as e:
-            print(f"相似度搜索失败: {e}")
-            raise
+            print(f"[LocalSearch] 搜索失败: {e}")
+            return f"搜索过程中出现问题: {str(e)}"
     
-    def _generate_response(self, query: str, context: str) -> str:
+    def search_with_entities(self, query: str, entity_ids: List[str] = None) -> str:
         """
-        使用LLM生成响应
+        基于指定实体进行本地搜索
         
         参数:
-            query: 用户查询
-            context: 检索到的上下文
+            query: 搜索查询字符串
+            entity_ids: 指定的实体ID列表
             
         返回:
-            str: 生成的响应
+            str: 生成的最终答案
         """
+        if not entity_ids:
+            return self.search(query)
+        
         try:
-            # 创建提示模板
+            # 获取实体相关的上下文信息
+            db_manager = get_db_manager()
+            
+            # 构建基于实体的检索查询
+            entity_query = """
+            MATCH (e:__Entity__)
+            WHERE e.id IN $entity_ids
+            WITH collect(e) as entities
+            """ + self.retrieval_query.replace("collect(node) as nodes", "entities as nodes")
+            
+            result = db_manager.execute_query(entity_query, {
+                "entity_ids": entity_ids,
+                "topChunks": self.top_chunks,
+                "topCommunities": self.top_communities,
+                "topOutsideRels": self.top_outside_rels,
+                "topInsideRels": self.top_inside_rels,
+            })
+            
+            if result.empty:
+                return self.search(query)  # 回退到常规搜索
+            
+            # 提取上下文
+            context_data = result.iloc[0]['text'] if 'text' in result.columns else ""
+
+            # 格式化上下文
+            if isinstance(context_data, dict):
+                chunks = context_data.get('Chunks', [])
+                reports = context_data.get('Reports', [])
+                relationships = context_data.get('Relationships', [])
+                entities = context_data.get('Entities', [])
+
+                # 安全地处理chunks
+                chunk_texts = []
+                if chunks:
+                    for chunk in chunks:
+                        if isinstance(chunk, dict):
+                            chunk_texts.append(chunk.get('text', ''))
+                        else:
+                            chunk_texts.append(str(chunk))
+
+                # 安全地处理entities
+                entity_texts = []
+                if entities:
+                    for entity in entities:
+                        if isinstance(entity, dict):
+                            entity_texts.append(entity.get('descriptionText', ''))
+                        else:
+                            entity_texts.append(str(entity))
+
+                # 安全地处理relationships
+                rel_texts = []
+                if relationships:
+                    for rel in relationships:
+                        if isinstance(rel, dict):
+                            rel_texts.append(rel.get('descriptionText', ''))
+                        else:
+                            rel_texts.append(str(rel))
+
+                context = SearchUtils.format_search_context(
+                    chunk_texts,
+                    entity_texts,
+                    rel_texts,
+                    reports if isinstance(reports, list) else [str(reports)] if reports else []
+                )
+            else:
+                context = str(context_data)
+            
+            # 使用LLM生成响应
             prompt = ChatPromptTemplate.from_messages([
                 ("system", LC_SYSTEM_PROMPT),
                 ("human", """
                     ---分析报告--- 
-                    请注意，下面提供的分析报告按**重要性降序排列**。
-
                     {context}
 
                     用户的问题是：
@@ -180,164 +371,84 @@ class LocalSearch(BaseSearch):
                  )
             ])
             
-            # 创建处理链
             chain = prompt | self.llm | StrOutputParser()
             
-            # 生成响应
             response = chain.invoke({
                 "context": context,
                 "input": query,
                 "response_type": self.response_type
             })
             
+            # 验证搜索结果
+            if not SearchUtils.validate_search_result(response):
+                return "抱歉，未能找到相关信息来回答您的问题。"
+            
             return response
             
         except Exception as e:
-            print(f"响应生成失败: {e}")
-            raise
+            print(f"[LocalSearch] 基于实体的搜索失败: {e}")
+            return self.search(query)  # 回退到常规搜索
     
-    def search(self, query: str, **kwargs) -> str:
+    def get_search_context(self, query: str) -> Dict[str, Any]:
         """
-        执行本地搜索
-
+        获取搜索上下文信息（不生成最终答案）
+        
         参数:
             query: 搜索查询字符串
-            **kwargs: 其他参数
-
+            
         返回:
-            str: 生成的最终答案
+            Dict[str, Any]: 搜索上下文信息
         """
-        overall_start = time.time()
-        self._reset_metrics()
-        
         try:
-            # 生成缓存键
-            cache_key = self._get_cache_key(query, **kwargs)
-            
-            # 检查缓存
-            cached_result = self._get_from_cache(cache_key)
-            if cached_result is not None:
-                print(f"本地搜索缓存命中: {query[:50]}...")
-                return cached_result
-            
-            print(f"开始本地搜索: {query[:100]}...")
+            # 初始化向量存储
+            vector_store = Neo4jVector.from_existing_index(
+                self.embeddings,
+                url=self.neo4j_uri,
+                username=self.neo4j_username,
+                password=self.neo4j_password,
+                index_name=self.index_name,
+                retrieval_query=self.retrieval_query
+            )
             
             # 执行相似度搜索
-            search_start = time.time()
-            try:
-                docs = self._similarity_search(query)
-            except Exception as e:
-                print(f"相似度搜索失败: {e}")
-                # 尝试简单的文本搜索作为备选
-                try:
-                    print("尝试使用简单文本搜索...")
-                    simple_query = """
-                    MATCH (c:__Chunk__)
-                    WHERE c.text CONTAINS $query
-                    RETURN c.text AS text
-                    LIMIT 5
-                    """
-                    result = self._execute_db_query(simple_query, {"query": query})
-                    docs = []
-
-                    if hasattr(result, 'data'):
-                        for record in result.data():
-                            from langchain.schema import Document
-                            docs.append(Document(page_content=record['text']))
-                    elif hasattr(result, 'to_dict'):
-                        result_dict = result.to_dict()
-                        if 'data' in result_dict:
-                            for record in result_dict['data']:
-                                from langchain.schema import Document
-                                docs.append(Document(page_content=record['text']))
-                    else:
-                        for record in result:
-                            from langchain.schema import Document
-                            docs.append(Document(page_content=record.get('text', '')))
-
-                    print(f"简单搜索找到 {len(docs)} 个文档")
-                except Exception as inner_e:
-                    print(f"简单搜索也失败了: {inner_e}")
-                    docs = []
-
-            self.performance_metrics["query_time"] = time.time() - search_start
+            docs = vector_store.similarity_search(
+                query,
+                k=self.top_entities,
+                params={
+                    "topChunks": self.top_chunks,
+                    "topCommunities": self.top_communities,
+                    "topOutsideRels": self.top_outside_rels,
+                    "topInsideRels": self.top_inside_rels,
+                }
+            )
             
-            # 提取上下文
-            context = ""
-            if docs:
-                context = docs[0].page_content
-                print(f"检索到 {len(docs)} 个文档，上下文长度: {len(context)}")
-            else:
-                print("未检索到相关文档")
-                context = "未找到相关信息"
-            
-            # 生成响应
-            if context and context != "未找到相关信息":
-                response = self._generate_response(query, context)
-            else:
-                response = "抱歉，我无法在知识库中找到相关信息来回答您的问题。"
-            
-            # 缓存结果
-            self._set_to_cache(cache_key, response)
-            
-            # 记录总时间
-            self.performance_metrics["total_time"] = time.time() - overall_start
-            
-            print(f"本地搜索完成，耗时: {self.performance_metrics['total_time']:.2f}s")
-            
-            return response
-            
-        except Exception as e:
-            print(f"本地搜索失败: {e}")
-            self.error_stats["query_errors"] += 1
-            self.performance_metrics["total_time"] = time.time() - overall_start
-            
-            return f"搜索过程中出现问题: {str(e)}"
-    
-    def search_with_details(self, query: str, **kwargs) -> Dict[str, Any]:
-        """
-        执行本地搜索并返回详细信息
-        
-        参数:
-            query: 搜索查询字符串
-            **kwargs: 其他参数
-            
-        返回:
-            Dict: 包含搜索结果和详细信息的字典
-        """
-        start_time = time.time()
-        
-        try:
-            # 执行搜索
-            result = self.search(query, **kwargs)
-            
-            # 获取详细信息
-            docs = self._similarity_search(query)
-            
+            # 返回上下文信息
             return {
-                "result": result,
-                "documents": [
-                    {
-                        "content": doc.page_content,
-                        "metadata": doc.metadata
-                    } for doc in docs
-                ],
-                "performance": self.get_performance_metrics(),
-                "config": {
-                    "top_entities": self.top_entities,
-                    "top_chunks": self.top_chunks,
-                    "top_communities": self.top_communities,
-                    "response_type": self.response_type
-                },
-                "total_time": time.time() - start_time
+                "query": query,
+                "documents": docs,
+                "context": docs[0].page_content if docs else "",
+                "metadata": docs[0].metadata if docs else {}
             }
             
         except Exception as e:
-            print(f"详细搜索失败: {e}")
+            print(f"[LocalSearch] 获取搜索上下文失败: {e}")
             return {
-                "result": f"搜索失败: {str(e)}",
+                "query": query,
                 "documents": [],
-                "performance": self.get_performance_metrics(),
-                "error": str(e),
-                "total_time": time.time() - start_time
+                "context": "",
+                "metadata": {},
+                "error": str(e)
             }
+    
+    def close(self):
+        """关闭Neo4j驱动连接"""
+        # 连接由数据库管理器管理，这里不需要手动关闭
+        pass
+        
+    def __enter__(self):
+        """上下文管理器入口"""
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """上下文管理器出口"""
+        self.close()

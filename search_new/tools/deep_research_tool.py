@@ -1,413 +1,313 @@
-"""
-深度研究工具
-
-支持多轮推理和搜索的高级搜索工具
-"""
-
-from typing import Dict, List, Any, Union
+from typing import Dict, List, Any, Optional, AsyncGenerator
 import time
-
+import re
+import logging
+import json
+import traceback
 from langchain_core.tools import BaseTool
+from langchain_core.messages import SystemMessage, HumanMessage
+import asyncio
 
-from search_new.tools.base_tool import BaseSearchTool
+from search_new.tools.base import BaseSearchTool
 from search_new.tools.hybrid_tool import HybridSearchTool
 from search_new.tools.local_tool import LocalSearchTool
 from search_new.tools.global_tool import GlobalSearchTool
-from search_new.reasoning import (
-    ThinkingEngine,
-    QueryGenerator,
-    EvidenceTracker,
-    DualPathSearcher,
-    AnswerValidator
-)
+from config.reasoning_prompts import BEGIN_SEARCH_QUERY, BEGIN_SEARCH_RESULT, END_SEARCH_RESULT, MAX_SEARCH_LIMIT, \
+    END_SEARCH_QUERY, RELEVANT_EXTRACTION_PROMPT, SUB_QUERY_PROMPT, FOLLOWUP_QUERY_PROMPT, FINAL_ANSWER_PROMPT
+from search_new.reasoning.nlp.text_processor import extract_between
+from search_new.reasoning.prompts.prompt_manager import kb_prompt
+from search_new.reasoning.engines.thinking_engine import ThinkingEngine
+from search_new.reasoning.engines.validator import AnswerValidator
+from search_new.reasoning.engines.search_engine import DualPathSearcher, QueryGenerator
+from search_new.config.search_config import search_config
+from config.settings import KB_NAME
 
 
 class DeepResearchTool(BaseSearchTool):
     """
-    深度研究工具：通过多轮推理和搜索解决复杂问题
+    深度研究工具：整合多种搜索策略，实现多步骤的思考-搜索-推理过程
     
-    主要功能：
-    1. 多轮思考-搜索-推理循环
-    2. 子查询生成和执行
-    3. 证据收集和跟踪
-    4. 答案验证和优化
+    该工具实现了多步骤的研究过程，可以执行以下步骤：
+    1. 思考分析用户问题
+    2. 生成搜索查询
+    3. 执行搜索
+    4. 整合信息并进一步思考
+    5. 迭代上述过程直到获得完整答案
     """
     
     def __init__(self):
         """初始化深度研究工具"""
-        super().__init__(cache_dir=f"{self.config.cache.base_cache_dir}/deep_research")
+        super().__init__(cache_dir=search_config.get_cache_dir("deep_research"))
+
+        # 关键词缓存
+        self._keywords_cache = {}
         
-        # 初始化子工具
-        self.hybrid_tool = HybridSearchTool()
-        self.local_tool = LocalSearchTool()
-        self.global_tool = GlobalSearchTool()
+        # 初始化各种工具，用于不同阶段的搜索
+        self.hybrid_tool = HybridSearchTool()  # 用于关键词提取和混合搜索
+        self.global_tool = GlobalSearchTool()  # 用于社区检索
+        self.local_tool = LocalSearchTool()    # 用于本地搜索
         
-        # 初始化推理组件
+        # 初始化思考引擎
         self.thinking_engine = ThinkingEngine(self.llm)
-        self.query_generator = QueryGenerator(self.llm)
-        self.evidence_tracker = EvidenceTracker()
+        
+        # 初始化答案验证器
         self.answer_validator = AnswerValidator(self.llm)
         
         # 初始化双路径搜索器
-        self.dual_searcher = DualPathSearcher(
-            kb_retrieve_func=self._kb_retrieve,
-            kg_retrieve_func=self._kg_retrieve,
-            kb_name="knowledge_base"
-        )
+        self.dual_path_searcher = DualPathSearcher(self.llm)
         
-        # 深度研究配置
-        self.max_iterations = 5
-        self.max_sub_queries = 8
-        self.evidence_threshold = 0.7
+        # 初始化查询生成器
+        self.query_generator = QueryGenerator(self.llm)
         
-        # 执行状态
-        self.execution_logs = []
-        self.all_retrieved_info = []
-        self.current_query_context = {}
+        # 从配置加载参数
+        reasoning_config = search_config.get_reasoning_config()
+        self.max_iterations = reasoning_config.get("max_iterations", 5)
+        self.max_search_limit = reasoning_config.get("max_search_limit", 10)
         
-        print("深度研究工具初始化完成")
-    
+        # 搜索计数器
+        self.search_count = 0
+        
+        # 工具名称
+        self.tool_name = "DeepResearchTool"
+
     def _setup_chains(self):
-        """设置处理链"""
-        # 深度研究工具的链由子组件管理
+        """设置处理链（实现抽象方法）"""
+        # DeepResearchTool不需要单独的处理链，因为它使用其他工具
         pass
-    
-    def _kb_retrieve(self, query: str) -> List[str]:
-        """知识库检索函数"""
-        try:
-            result = self.local_tool.search(query)
-            return [result] if result else []
-        except Exception as e:
-            print(f"知识库检索失败: {e}")
-            return []
-    
-    def _kg_retrieve(self, query: str) -> List[str]:
-        """知识图谱检索函数"""
-        try:
-            result = self.global_tool.search(query)
-            return [result] if result else []
-        except Exception as e:
-            print(f"知识图谱检索失败: {e}")
-            return []
-    
-    def _log(self, message: str):
-        """记录执行日志"""
-        self.execution_logs.append(message)
-        print(message)
     
     def extract_keywords(self, query: str) -> Dict[str, List[str]]:
         """
-        提取关键词
+        从查询中提取关键词
         
         参数:
             query: 查询字符串
             
         返回:
-            Dict[str, List[str]]: 关键词字典
+            Dict[str, List[str]]: 包含low_level和high_level关键词的字典
         """
-        try:
-            return self.hybrid_tool.extract_keywords(query)
-        except Exception as e:
-            print(f"关键词提取失败: {e}")
-            return {"low_level": [], "high_level": []}
+        # 使用缓存
+        if query in self._keywords_cache:
+            return self._keywords_cache[query]
+        
+        # 使用混合工具提取关键词
+        keywords = self.hybrid_tool.extract_keywords(query)
+        
+        # 缓存结果
+        self._keywords_cache[query] = keywords
+        
+        return keywords
     
-    def search(self, query_input: Union[str, Dict[str, Any]]) -> str:
+    def search(self, query_input: Any) -> str:
         """
         执行深度研究搜索
         
         参数:
-            query_input: 查询输入
+            query_input: 查询输入，可以是字符串或字典
             
         返回:
             str: 研究结果
         """
         overall_start = time.time()
-        self._reset_metrics()
+        
+        # 解析输入
+        if isinstance(query_input, dict) and "query" in query_input:
+            query = query_input["query"]
+            keywords = query_input.get("keywords", [])
+        else:
+            query = str(query_input)
+            keywords = []
+        
+        # 检查缓存
+        cache_key = f"deep_research_{query}"
+        if keywords:
+            cache_key = f"deep_research_{query}||{','.join(sorted(keywords))}"
+        
+        cached_result = self.cache_manager.get(cache_key)
+        if cached_result:
+            return cached_result
         
         try:
-            # 解析查询
-            if isinstance(query_input, dict):
-                query = query_input.get("query", str(query_input))
-            else:
-                query = str(query_input)
+            # 重置搜索计数器
+            self.search_count = 0
             
-            # 生成缓存键
-            cache_key = self._get_cache_key(query)
+            # 初始化思考引擎
+            self.thinking_engine.initialize_with_query(query)
             
-            # 检查缓存
-            cached_result = self._get_from_cache(cache_key)
-            if cached_result:
-                print(f"深度研究缓存命中: {query[:50]}...")
-                return cached_result
-            
-            print(f"开始深度研究: {query[:100]}...")
-            
-            # 执行深度研究流程
-            result = self._execute_deep_research(query)
+            # 执行多步骤研究过程
+            research_result = self._conduct_deep_research(query)
             
             # 缓存结果
-            self._set_to_cache(cache_key, result)
+            self.cache_manager.set(cache_key, research_result)
             
             # 记录性能指标
             self.performance_metrics["total_time"] = time.time() - overall_start
+            self.performance_metrics["search_count"] = self.search_count
             
-            print(f"深度研究完成，耗时: {self.performance_metrics['total_time']:.2f}s")
-            return result
+            return research_result
             
         except Exception as e:
-            print(f"深度研究失败: {e}")
-            self.error_stats["query_errors"] += 1
+            print(f"[{self.tool_name}] 深度研究失败: {e}")
+            error_msg = f"深度研究过程中出现问题: {str(e)}"
+            
+            # 记录性能指标
             self.performance_metrics["total_time"] = time.time() - overall_start
+            self.performance_metrics["error"] = str(e)
             
-            return f"深度研究过程中出现问题: {str(e)}"
+            return error_msg
     
-    def _execute_deep_research(self, query: str) -> str:
-        """执行深度研究流程"""
-        try:
-            # 清空执行状态
-            self.execution_logs = []
-            self.all_retrieved_info = []
-            
-            # 创建证据链
-            evidence_chain_id = self.evidence_tracker.create_evidence_chain(query)
-            
-            # 初始化思考引擎
-            thinking_session_id = self.thinking_engine.create_session(query)
-            
-            self._log(f"开始深度研究: {query}")
-            
-            # 生成初始子查询
-            from search_new.reasoning.core.query_generator import QueryContext
-            query_context = QueryContext(
-                original_query=query,
-                current_context="初始查询分析"
-            )
-            
-            initial_sub_queries = self.query_generator.generate_sub_queries(query_context)
-            self._log(f"生成了 {len(initial_sub_queries)} 个初始子查询")
-            
-            # 执行多轮研究
-            iteration = 0
-            think_content = ""
-            
-            while iteration < self.max_iterations:
-                iteration += 1
-                self._log(f"\n=== 第 {iteration} 轮研究 ===")
-                
-                # 生成下一步查询
-                next_query_result = self.thinking_engine.generate_next_query()
-                
-                if next_query_result["status"] == "answer_ready":
-                    self._log("思考引擎认为可以生成答案")
-                    break
-                elif next_query_result["status"] == "has_query":
-                    # 执行查询
-                    queries = next_query_result["queries"]
-                    self._log(f"执行 {len(queries)} 个查询")
-                    
-                    for sub_query in queries[:3]:  # 限制查询数量
-                        search_results = self._execute_sub_query(sub_query)
-                        
-                        # 添加证据
-                        for result in search_results:
-                            self.evidence_tracker.add_evidence(
-                                source_id=f"search_{iteration}",
-                                content=result,
-                                source_type="search_result",
-                                relevance_score=0.8,
-                                confidence_score=0.8
-                            )
-                        
-                        # 更新思考引擎
-                        self.thinking_engine.add_executed_query(
-                            sub_query, 
-                            "\n".join(search_results)
-                        )
-                
-                # 更新思考内容
-                think_content += next_query_result.get("content", "")
-                
-                # 检查是否有足够证据
-                evidence_summary = self.evidence_tracker.get_evidence_chain_summary()
-                if evidence_summary.get("evidence_count", 0) >= 5:
-                    self._log("收集到足够证据，准备生成答案")
-                    break
-            
-            # 生成最终答案
-            final_answer = self._generate_final_answer(query, think_content)
-            
-            # 验证答案
-            validation_result = self.answer_validator.validate_answer(
-                query, 
-                final_answer,
-                [info.get("content", "") for info in self.all_retrieved_info]
-            )
-            
-            if not validation_result.is_valid:
-                self._log(f"答案验证失败: {validation_result.issues}")
-                # 可以选择重新生成或改进答案
-            
-            return final_answer
-            
-        except Exception as e:
-            print(f"深度研究执行失败: {e}")
-            return f"深度研究过程中出现错误: {str(e)}"
-    
-    def _execute_sub_query(self, sub_query: str) -> List[str]:
-        """执行子查询"""
-        try:
-            self._log(f"执行子查询: {sub_query}")
-            
-            # 使用双路径搜索
-            results = self.dual_searcher.search(sub_query)
-            
-            # 记录检索信息
-            for result in results:
-                self.all_retrieved_info.append({
-                    "query": sub_query,
-                    "content": result,
-                    "timestamp": time.time()
-                })
-            
-            return results
-            
-        except Exception as e:
-            print(f"子查询执行失败: {e}")
-            return []
-    
-    def _generate_final_answer(self, query: str, think_content: str) -> str:
-        """生成最终答案"""
-        try:
-            # 收集所有检索到的信息
-            all_content = []
-            for info in self.all_retrieved_info:
-                all_content.append(info["content"])
-            
-            retrieved_content = "\n\n".join(all_content)
-            
-            # 使用混合工具生成答案
-            answer_query = f"""
-            基于以下思考过程和检索信息，回答问题：{query}
-
-            思考过程：
-            {think_content}
-
-            检索信息：
-            {retrieved_content}
-
-            请生成一个完整、准确的答案。
-            """
-            
-            final_answer = self.hybrid_tool.search(answer_query)
-            
-            return final_answer
-            
-        except Exception as e:
-            print(f"最终答案生成失败: {e}")
-            return "抱歉，无法生成满意的答案。"
-    
-    def thinking(self, query: str) -> Dict[str, Any]:
+    def _conduct_deep_research(self, query: str) -> str:
         """
-        执行思考过程并返回详细信息
+        执行深度研究过程
         
         参数:
-            query: 查询字符串
+            query: 用户查询
             
         返回:
-            Dict: 思考过程详情
+            str: 研究结果
         """
+        # 收集的信息
+        collected_info = []
+        
+        # 迭代研究过程
+        for iteration in range(self.max_iterations):
+            print(f"[{self.tool_name}] 开始第 {iteration + 1} 轮研究...")
+            
+            # 生成下一步查询
+            next_query_result = self.thinking_engine.generate_next_query()
+            
+            if next_query_result["status"] == "max_iterations_reached":
+                print(f"[{self.tool_name}] 达到最大迭代次数，结束研究")
+                break
+            elif next_query_result["status"] == "answer_ready":
+                print(f"[{self.tool_name}] 思考引擎认为已有足够信息")
+                break
+            elif next_query_result["status"] == "error":
+                print(f"[{self.tool_name}] 生成查询时出错: {next_query_result['content']}")
+                break
+            
+            # 获取查询列表
+            queries = next_query_result.get("queries", [])
+            if not queries:
+                print(f"[{self.tool_name}] 没有生成新的查询，结束研究")
+                break
+            
+            # 执行搜索
+            for search_query in queries:
+                if self.search_count >= self.max_search_limit:
+                    print(f"[{self.tool_name}] 达到最大搜索次数限制")
+                    break
+                
+                # 执行双路径搜索
+                search_result = self.dual_path_searcher.search(search_query)
+                self.search_count += 1
+                
+                # 记录执行的查询
+                self.thinking_engine.add_executed_query(search_query)
+                
+                # 添加搜索结果到思考历史
+                if search_result["status"] == "success":
+                    result_content = search_result["content"]
+                    collected_info.append(result_content)
+                    self.thinking_engine.add_search_result(search_query, result_content)
+                else:
+                    error_info = f"搜索失败: {search_result.get('content', '未知错误')}"
+                    self.thinking_engine.add_search_result(search_query, error_info)
+        
+        # 生成最终答案
+        final_answer = self._generate_final_answer(query, collected_info)
+        
+        return final_answer
+    
+    def _generate_final_answer(self, query: str, collected_info: List[str]) -> str:
+        """
+        基于收集的信息生成最终答案
+        
+        参数:
+            query: 原始查询
+            collected_info: 收集的信息列表
+            
+        返回:
+            str: 最终答案
+        """
+        if not collected_info:
+            return "抱歉，没有找到相关信息来回答您的问题。"
+        
         try:
-            # 执行深度研究
-            result = self.search(query)
+            # 构建最终答案生成提示
+            context = "\n\n".join(collected_info)
+            thinking_summary = self.thinking_engine.get_thinking_summary()
             
-            # 获取思考历史
-            thinking_history = self.thinking_engine.get_thinking_history()
+            final_prompt = f"""
+            基于以下研究过程和收集的信息，请生成一个全面、准确的答案：
             
-            # 获取证据链摘要
-            evidence_summary = self.evidence_tracker.get_evidence_chain_summary()
+            原始问题: {query}
             
-            # 获取推理轨迹
-            reasoning_trace = self.evidence_tracker.get_reasoning_trace()
+            思考过程摘要:
+            {thinking_summary}
             
-            return {
-                "query": query,
-                "final_answer": result,
-                "thinking_history": thinking_history,
-                "evidence_summary": evidence_summary,
-                "reasoning_trace": reasoning_trace,
-                "execution_logs": self.execution_logs,
-                "retrieved_info": self.all_retrieved_info,
-                "performance": self.get_performance_metrics()
-            }
+            收集的信息:
+            {context}
+            
+            请提供一个结构化、详细的答案，包括：
+            1. 直接回答用户的问题
+            2. 提供支持性的详细信息
+            3. 如果适用，包含相关的背景信息
+            
+            答案应该准确、完整且易于理解。
+            """
+            
+            # 调用LLM生成最终答案
+            response = self.llm.invoke([HumanMessage(content=final_prompt)])
+            final_answer = response.content if hasattr(response, 'content') else str(response)
+            
+            # 验证答案质量
+            validation_result = self.answer_validator.validate_answer(query, final_answer, context)
+            
+            if not validation_result["is_valid"]:
+                print(f"[{self.tool_name}] 答案质量验证失败，分数: {validation_result['score']:.2f}")
+                # 可以选择重新生成或添加改进建议
+                suggestions = self.answer_validator.suggest_improvements(query, final_answer, validation_result)
+                if suggestions:
+                    final_answer += f"\n\n注意: {'; '.join(suggestions)}"
+            
+            return final_answer
             
         except Exception as e:
-            print(f"思考过程执行失败: {e}")
-            return {
-                "query": query,
-                "error": str(e),
-                "execution_logs": self.execution_logs
-            }
+            print(f"[{self.tool_name}] 生成最终答案失败: {e}")
+            # 返回简单的信息汇总
+            return f"基于研究收集的信息：\n\n" + "\n\n".join(collected_info[:3])
     
-    def get_tool(self) -> BaseTool:
-        """获取LangChain兼容的工具"""
-        class DeepResearchRetrievalTool(BaseTool):
-            name: str = "deep_research"
-            description: str = "深度研究工具：通过多轮推理和搜索解决复杂问题，尤其适用于需要深入分析的查询。"
-            
-            def _run(self_tool, query: Any) -> str:
-                return self.search(query)
-            
-            def _arun(self_tool, query: Any) -> str:
-                raise NotImplementedError("异步执行未实现")
+    def get_research_stats(self) -> Dict[str, Any]:
+        """
+        获取研究统计信息
         
-        return DeepResearchRetrievalTool()
+        返回:
+            Dict[str, Any]: 统计信息
+        """
+        return {
+            "search_count": self.search_count,
+            "max_search_limit": self.max_search_limit,
+            "reasoning_steps": len(self.thinking_engine.get_reasoning_history()),
+            "executed_queries": self.thinking_engine.get_executed_queries(),
+            "performance_metrics": self.performance_metrics
+        }
     
-    def get_thinking_tool(self) -> BaseTool:
-        """获取思考过程可见的工具版本"""
-        class DeepThinkingTool(BaseTool):
-            name: str = "deep_thinking"
-            description: str = "深度思考工具：显示完整思考过程的深度研究，适用于需要查看推理步骤的情况。"
-            
-            def _run(self_tool, query: Any) -> Dict:
-                # 解析输入
-                if isinstance(query, dict) and "query" in query:
-                    tk_query = query["query"]
-                else:
-                    tk_query = str(query)
-                
-                # 执行思考过程
-                return self.thinking(tk_query)
-            
-            def _arun(self_tool, query: Any) -> Dict:
-                raise NotImplementedError("异步执行未实现")
-        
-        return DeepThinkingTool()
+    def reset(self):
+        """重置工具状态"""
+        self.search_count = 0
+        self.thinking_engine.reset()
+        self.dual_path_searcher.reset_search_count()
+        self._keywords_cache.clear()
+        self.performance_metrics.clear()
     
     def close(self):
-        """关闭深度研究工具"""
-        try:
-            # 调用父类方法
-            super().close()
-            
-            # 关闭子工具
-            if hasattr(self, 'hybrid_tool'):
-                self.hybrid_tool.close()
-            if hasattr(self, 'local_tool'):
-                self.local_tool.close()
-            if hasattr(self, 'global_tool'):
-                self.global_tool.close()
-            
-            # 关闭推理组件
-            if hasattr(self, 'thinking_engine'):
-                self.thinking_engine.close()
-            if hasattr(self, 'query_generator'):
-                self.query_generator.close()
-            if hasattr(self, 'evidence_tracker'):
-                self.evidence_tracker.close()
-            if hasattr(self, 'answer_validator'):
-                self.answer_validator.close()
-            if hasattr(self, 'dual_searcher'):
-                self.dual_searcher.close()
-                
-        except Exception as e:
-            print(f"深度研究工具关闭失败: {e}")
+        """关闭资源"""
+        super().close()
+        
+        # 关闭子工具
+        if hasattr(self, 'hybrid_tool'):
+            self.hybrid_tool.close()
+        if hasattr(self, 'global_tool'):
+            self.global_tool.close()
+        if hasattr(self, 'local_tool'):
+            self.local_tool.close()

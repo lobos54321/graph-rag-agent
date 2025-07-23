@@ -1,410 +1,490 @@
-"""
-增强深度研究工具
-
-在深度研究基础上添加社区感知和知识图谱功能
-"""
-
-from typing import Dict, List, Any, Union, AsyncGenerator
+from typing import Dict, Any, List, AsyncGenerator
+import json
 import time
+import traceback
 import asyncio
+import re
+import os
 
 from langchain_core.tools import BaseTool
 
-from search_new.tools.deep_research_tool import DeepResearchTool
-from search_new.reasoning import (
-    ChainedExploration,
-    ComplexityEstimator,
-    KnowledgeGraphBuilder
+from model.get_models import get_llm_model, get_embeddings_model
+from config.neo4jdb import get_db_manager
+from config.prompt import (
+    system_template_build_graph,
+    human_template_build_graph
 )
+from config.settings import (
+    entity_types,
+    relationship_types
+)
+from config.reasoning_prompts import RELEVANT_EXTRACTION_PROMPT
+from search_new.reasoning.prompts.prompt_manager import kb_prompt
+from graph.extraction.entity_extractor import EntityRelationExtractor
+from search_new.tools.deep_research_tool import DeepResearchTool
+from search_new.tools.hybrid_tool import HybridSearchTool
+from search_new.reasoning.enhancers.community_enhancer import CommunityAwareSearchEnhancer
+from search_new.reasoning.engines.thinking_engine import ThinkingEngine
+from search_new.reasoning.enhancers.kg_builder import DynamicKnowledgeGraphBuilder
+from search_new.reasoning.enhancers.evidence_tracker import EvidenceChainTracker
+from search_new.reasoning.enhancers.exploration_chain import ChainOfExplorationSearcher
+from search_new.reasoning.engines.validator import complexity_estimate
 
 
-class DeeperResearchTool(DeepResearchTool):
+class DeeperResearchTool:
     """
-    增强深度研究工具：添加社区感知和知识图谱分析
+    增强版深度研究工具
     
-    主要功能：
-    1. 继承深度研究的所有功能
-    2. 社区感知搜索增强
-    3. 动态知识图谱构建
-    4. 链式探索搜索
-    5. 复杂度自适应策略
+    整合社区感知、动态知识图谱和Chain of Exploration等功能，
+    提供更全面的深度研究能力，并充分利用所有高级推理功能
     """
     
-    def __init__(self):
-        """初始化增强深度研究工具"""
-        super().__init__()
-        
-        # 初始化增强组件
-        self.complexity_estimator = ComplexityEstimator()
-        self.knowledge_builder = KnowledgeGraphBuilder(self.llm)
-        self.chain_explorer = ChainedExploration(
-            graph_query_func=self._graph_query,
-            max_steps=self.config.exploration.max_exploration_steps
-        )
-        
-        # 增强配置
-        self.enable_community_aware = True
-        self.enable_kg_building = True
-        self.enable_chain_exploration = True
-        self.complexity_threshold = 0.7
-        
-        # 社区感知缓存
-        self._community_cache = {}
-        self._kg_cache = {}
-        
-        print("增强深度研究工具初始化完成")
-    
-    def _graph_query(self, cypher: str, params: Dict[str, Any] = None) -> List[Dict[str, Any]]:
-        """图数据库查询函数"""
-        try:
-            # 这里应该连接到实际的图数据库
-            # 为了演示，返回模拟结果
-            return []
-        except Exception as e:
-            print(f"图查询失败: {e}")
-            return []
-    
-    def search(self, query_input: Union[str, Dict[str, Any]]) -> str:
+    def __init__(self, config=None, llm=None, embeddings=None, graph=None):
         """
-        执行增强深度研究搜索
+        初始化增强版深度研究工具
         
-        参数:
-            query_input: 查询输入
-            
-        返回:
+        Args:
+            config: 配置参数
+            llm: 语言模型
+            embeddings: 嵌入模型
+            graph: 图数据库连接
+        """
+        # 关键词缓存
+        self._keywords_cache = {}
+
+        # 初始化基础组件
+        self.llm = llm or get_llm_model()
+        self.embeddings = embeddings or get_embeddings_model()
+        self.graph = graph or get_db_manager()
+
+        self.hybrid_tool = HybridSearchTool()
+        
+        # 初始化增强模块
+        # 1. 社区感知搜索增强器
+        self.community_search = CommunityAwareSearchEnhancer(self.llm)
+        
+        # 2. 动态知识图谱构建器
+        self.knowledge_builder = DynamicKnowledgeGraphBuilder(self.llm)
+        
+        # 3. Chain of Exploration检索器
+        self.chain_explorer = ChainOfExplorationSearcher(self.llm)
+        
+        # 4. 证据链跟踪器
+        self.evidence_tracker = EvidenceChainTracker(self.llm)
+        
+        # 5. 继承原有的深度研究工具功能
+        self.deep_research = DeepResearchTool()
+
+        # 6. 查询生成器
+        self.query_generator = self.deep_research.query_generator
+        
+        # 缓存设置
+        self.enable_cache = True
+        self.cache_dir = "./cache/deeper_research"
+        
+        # 确保缓存目录存在
+        if not os.path.exists(self.cache_dir):
+            os.makedirs(self.cache_dir)
+                
+        # 添加执行日志容器
+        self.execution_logs = []
+        
+        # 添加性能指标跟踪
+        self.performance_metrics = {"total_time": 0}
+        
+        # 记录当前查询的上下文信息
+        self.current_query_context = {}
+        
+        # 记录已探索的查询分支
+        self.explored_branches = {}
+        
+        # 共享思考引擎实例，避免重复初始化
+        if hasattr(self.deep_research, 'thinking_engine'):
+            self.thinking_engine = self.deep_research.thinking_engine
+        else:
+            self.thinking_engine = ThinkingEngine(self.llm)
+            self.deep_research.thinking_engine = self.thinking_engine
+        
+        # 添加各种缓存字典
+        self._search_cache = {}
+        self._thinking_cache = {}
+        self._contradiction_cache = {}
+        self._hypotheses_cache = {}
+        self._counter_cache = {}
+        self._coe_cache = {}
+        self._specific_coe_cache = {}
+        self._contradiction_detailed_cache = {}
+        self._stream_search_cache = {}
+        self._stream_thinking_cache = {}
+        self._subquery_cache = {}
+    
+    def _log(self, message):
+        """记录执行日志"""
+        self.execution_logs.append(message)
+        # print(message)  # 可选：同时打印到控制台
+    
+    def extract_keywords(self, query: str) -> Dict[str, List[str]]:
+        """从查询中提取关键词"""
+        # 检查缓存
+        if query in self._keywords_cache:
+            return self._keywords_cache[query]
+
+        keywords = self.hybrid_tool.extract_keywords(query)
+        
+        # 缓存结果
+        self._keywords_cache[query] = keywords
+        return keywords
+
+    def _enhance_search_with_coe(self, query: str, keywords: Dict[str, List[str]]):
+        """
+        使用Chain of Exploration增强搜索
+
+        Args:
+            query: 用户查询
+            keywords: 关键词字典
+
+        Returns:
+            Dict: 增强搜索结果
+        """
+        # 添加缓存检查
+        cache_key = f"coe_search:{query}"
+        if hasattr(self, '_coe_cache') and cache_key in self._coe_cache:
+            return self._coe_cache[cache_key]
+
+        # 获取社区感知上下文
+        community_context = self.community_search.enhance_search_with_community_context(query, keywords)
+        search_strategy = community_context.get("search_strategy", {})
+
+        # 提取关注实体
+        focus_entities = search_strategy.get("focus_entities", [])
+        if not focus_entities:
+            # 如果没有关注实体，从关键词提取
+            focus_entities = keywords.get("high_level", []) + keywords.get("low_level", [])
+
+        # 使用Chain of Exploration探索
+        if focus_entities:
+            # 添加缓存检查
+            coe_cache_key = f"coe:{query}:{','.join(focus_entities[:3])}"
+            if hasattr(self, '_specific_coe_cache') and coe_cache_key in self._specific_coe_cache:
+                exploration_results = self._specific_coe_cache[coe_cache_key]
+            else:
+                exploration_results = self.chain_explorer.explore(
+                    focus_entities[:3],  # 使用前3个关注实体作为起点
+                    query
+                )
+                if not hasattr(self, '_specific_coe_cache'):
+                    self._specific_coe_cache = {}
+                self._specific_coe_cache[coe_cache_key] = exploration_results
+
+            # 将探索结果添加到社区上下文
+            community_context["exploration_results"] = exploration_results
+
+            # 更新搜索策略
+            discovered_entities = []
+            for step in exploration_results.get("exploration_path", []):
+                if step.get("step", 0) > 0:  # 跳过起始实体
+                    discovered_entities.append(step.get("node_id", ""))
+
+            if discovered_entities:
+                search_strategy["discovered_entities"] = discovered_entities
+                community_context["search_strategy"] = search_strategy
+
+        # 缓存结果
+        if not hasattr(self, '_coe_cache'):
+            self._coe_cache = {}
+        self._coe_cache[cache_key] = community_context
+
+        return community_context
+
+    def _create_multiple_reasoning_branches(self, query_id, hypotheses=None):
+        """
+        根据多个假设创建多个推理分支
+
+        Args:
+            query_id: 查询ID
+            hypotheses: 假设列表
+
+        Returns:
+            Dict: 包含分支结果的字典
+        """
+        branch_results = {}
+
+        # 避免重复生成假设
+        if hypotheses is None:
+            # 从query_id获取原始查询
+            original_query = None
+            for query, current_id in self.current_query_context.items():
+                if current_id == query_id:
+                    original_query = query
+                    break
+
+            if original_query is None:
+                # 如果找不到原始查询，尝试从思考引擎获取
+                if hasattr(self.thinking_engine, 'query'):
+                    original_query = self.thinking_engine.query
+                else:
+                    # 兜底方案，使用一个空假设列表
+                    self._log(f"\n[分支推理] 无法找到原始查询，无法生成假设")
+                    return {}
+
+            # 检查假设缓存
+            if not hasattr(self, '_hypotheses_cache'):
+                self._hypotheses_cache = {}
+
+            if query_id in self._hypotheses_cache:
+                hypotheses = self._hypotheses_cache[query_id]
+            else:
+                # 生成假设并缓存
+                hypotheses = self.query_generator.generate_multiple_hypotheses(original_query, self.llm)
+                self._hypotheses_cache[query_id] = hypotheses
+
+        # 为每个假设创建一个推理分支
+        for i, hypothesis in enumerate(hypotheses[:3]):  # 限制最多3个分支
+            branch_name = f"branch_{i+1}"
+
+            # 在思考引擎中创建推理分支
+            if hasattr(self.thinking_engine, 'branch_reasoning'):
+                self.thinking_engine.branch_reasoning(branch_name)
+
+            # 记录分支创建
+            self._log(f"\n[分支推理] 创建分支 {branch_name}: {hypothesis}")
+
+            # 添加推理步骤
+            step_id = self.evidence_tracker.add_reasoning_step(
+                query_id,
+                f"branch_{branch_name}",
+                f"基于假设: {hypothesis} 创建推理分支"
+            )
+
+            # 记录分支信息
+            self.explored_branches[branch_name] = {
+                "hypothesis": hypothesis,
+                "step_id": step_id,
+                "evidence": []
+            }
+
+            # 在思考引擎中添加假设作为推理步骤
+            self.thinking_engine.add_reasoning_step(
+                f"探索假设: {hypothesis}"
+            )
+
+            # 应用反事实分析 - 仅对第一个分支进行
+            if i == 0:
+                # 缓存反事实分析
+                counter_cache_key = f"counter:{query_id}:{hypothesis}"
+                if hasattr(self, '_counter_cache') and counter_cache_key in self._counter_cache:
+                    counter_analysis = self._counter_cache[counter_cache_key]
+                else:
+                    if hasattr(self.thinking_engine, 'counter_factual_analysis'):
+                        counter_analysis = self.thinking_engine.counter_factual_analysis(
+                            f"假设 {hypothesis} 不成立"
+                        )
+                    else:
+                        counter_analysis = f"反事实分析: 如果假设 {hypothesis} 不成立，需要考虑其他可能性"
+
+                    if not hasattr(self, '_counter_cache'):
+                        self._counter_cache = {}
+                    self._counter_cache[counter_cache_key] = counter_analysis
+
+                # 记录反事实分析结果
+                if hasattr(self.evidence_tracker, 'add_evidence'):
+                    self.evidence_tracker.add_evidence(
+                        f"counter_analysis_{i}",
+                        counter_analysis
+                    )
+
+            branch_results[branch_name] = {
+                "hypothesis": hypothesis,
+                "step_id": step_id,
+                "counter_analysis": counter_analysis if i == 0 else None
+            }
+
+        return branch_results
+
+    def _detect_and_resolve_contradictions(self, query_id):
+        """
+        检测并处理信息矛盾
+
+        Args:
+            query_id: 查询ID
+
+        Returns:
+            Dict: 矛盾分析结果
+        """
+        # 添加缓存检查
+        cache_key = f"contradiction:{query_id}"
+        if hasattr(self, '_contradiction_detailed_cache') and cache_key in self._contradiction_detailed_cache:
+            return self._contradiction_detailed_cache[cache_key]
+
+        # 获取所有已收集的证据
+        all_evidence = []
+        if hasattr(self.evidence_tracker, 'get_reasoning_chain'):
+            reasoning_chain = self.evidence_tracker.get_reasoning_chain(query_id)
+
+            for step in reasoning_chain.get("steps", []):
+                step_id = step.get("step_id", "")
+                evidence_ids = step.get("evidence_ids", [])
+                if evidence_ids:
+                    all_evidence.extend(evidence_ids)
+
+        # 检测矛盾
+        contradictions = []
+        if hasattr(self.evidence_tracker, 'detect_contradictions'):
+            contradictions = self.evidence_tracker.detect_contradictions(all_evidence)
+
+        if contradictions:
+            self._log(f"\n[矛盾检测] 发现 {len(contradictions)} 个矛盾")
+
+            # 记录矛盾分析
+            contradiction_step_id = self.evidence_tracker.add_reasoning_step(
+                query_id,
+                "contradiction_analysis",
+                f"分析 {len(contradictions)} 个信息矛盾"
+            )
+
+            # 解析每个矛盾
+            for i, contradiction in enumerate(contradictions):
+                contradiction_type = contradiction.get("type", "unknown")
+                analysis = ""
+
+                if contradiction_type == "numerical":
+                    analysis = (f"数值矛盾: 在 '{contradiction.get('context', '')}' 中, "
+                            f"发现值 {contradiction.get('value1')} 和 {contradiction.get('value2')}")
+                elif contradiction_type == "semantic":
+                    analysis = f"语义矛盾: {contradiction.get('analysis', '')}"
+
+                # 记录矛盾证据
+                if hasattr(self.evidence_tracker, 'add_evidence'):
+                    self.evidence_tracker.add_evidence(
+                        f"contradiction_{i}",
+                        analysis
+                    )
+
+                self._log(f"\n[矛盾分析] {analysis}")
+
+            result = {"contradictions": contradictions, "step_id": contradiction_step_id}
+        else:
+            result = {"contradictions": [], "step_id": None}
+
+        # 缓存结果
+        if not hasattr(self, '_contradiction_detailed_cache'):
+            self._contradiction_detailed_cache = {}
+        self._contradiction_detailed_cache[cache_key] = result
+
+        return result
+
+    def _generate_citations(self, answer, query_id):
+        """
+        为答案生成引用标记
+
+        Args:
+            answer: 原始答案
+            query_id: 查询ID
+
+        Returns:
+            str: 带引用的答案
+        """
+        # 使用证据链跟踪器生成引用
+        citation_result = self.evidence_tracker.generate_citations(answer)
+        cited_answer = citation_result.get("cited_answer", answer)
+
+        # 记录引用信息
+        self._log(f"\n[引用生成] 添加了 {len(citation_result.get('citations', []))} 个引用")
+
+        return cited_answer
+
+    def search(self, query_input, **kwargs):
+        """
+        执行增强版深度研究
+
+        Args:
+            query_input: 查询输入，可以是字符串或字典
+            **kwargs: 其他参数
+
+        Returns:
             str: 研究结果
         """
-        overall_start = time.time()
-        self._reset_metrics()
-        
-        try:
-            # 解析查询
-            if isinstance(query_input, dict):
-                query = query_input.get("query", str(query_input))
-            else:
-                query = str(query_input)
-            
-            # 生成缓存键
-            cache_key = self._get_cache_key(query, enhanced=True)
-            
-            # 检查缓存
-            cached_result = self._get_from_cache(cache_key)
-            if cached_result:
-                print(f"增强深度研究缓存命中: {query[:50]}...")
-                return cached_result
-            
-            print(f"开始增强深度研究: {query[:100]}...")
-            
-            # 评估查询复杂度
-            complexity = self.complexity_estimator.estimate_complexity(query)
-            self._log(f"查询复杂度: {complexity.complexity_level.value} ({complexity.overall_complexity:.2f})")
-            
-            # 根据复杂度选择策略
-            if complexity.overall_complexity >= self.complexity_threshold:
-                result = self._execute_enhanced_research(query, complexity)
-            else:
-                # 对于简单查询，使用基础深度研究
-                result = super().search(query)
-            
-            # 缓存结果
-            self._set_to_cache(cache_key, result)
-            
-            # 记录性能指标
-            self.performance_metrics["total_time"] = time.time() - overall_start
-            
-            print(f"增强深度研究完成，耗时: {self.performance_metrics['total_time']:.2f}s")
-            return result
-            
-        except Exception as e:
-            print(f"增强深度研究失败: {e}")
-            self.error_stats["query_errors"] += 1
-            self.performance_metrics["total_time"] = time.time() - overall_start
-            
-            return f"增强深度研究过程中出现问题: {str(e)}"
-    
-    def _execute_enhanced_research(self, query: str, complexity) -> str:
-        """执行增强研究流程"""
-        try:
-            self._log("启动增强研究模式")
-            
-            # 清空执行状态
-            self.execution_logs = []
-            self.all_retrieved_info = []
-            
-            # 创建证据链和思考会话
-            evidence_chain_id = self.evidence_tracker.create_evidence_chain(query)
-            thinking_session_id = self.thinking_engine.create_session(query)
-            
-            # 提取关键词
-            keywords = self.extract_keywords(query)
-            
-            # 社区感知搜索增强
-            if self.enable_community_aware:
-                community_context = self._enhance_search_with_community(query, keywords)
-                self._log(f"社区感知增强完成")
-            
-            # 动态知识图谱构建
-            if self.enable_kg_building:
-                kg_graph_id = self._build_dynamic_knowledge_graph(query)
-                self._log(f"动态知识图谱构建完成: {kg_graph_id}")
-            
-            # 链式探索搜索
-            if self.enable_chain_exploration and keywords.get("high_level"):
-                exploration_path_id = self._execute_chain_exploration(query, keywords)
-                self._log(f"链式探索完成: {exploration_path_id}")
-            
-            # 执行基础深度研究流程
-            base_result = self._execute_deep_research(query)
-            
-            # 增强答案生成
-            enhanced_result = self._enhance_final_answer(query, base_result, complexity)
-            
-            return enhanced_result
-            
-        except Exception as e:
-            print(f"增强研究执行失败: {e}")
-            # 降级到基础深度研究
-            return super()._execute_deep_research(query)
-    
-    def _enhance_search_with_community(self, query: str, keywords: Dict[str, List[str]]) -> Dict[str, Any]:
-        """社区感知搜索增强"""
-        try:
-            cache_key = f"community:{query}"
-            if cache_key in self._community_cache:
-                return self._community_cache[cache_key]
-            
-            # 模拟社区感知分析
-            community_context = {
-                "search_strategy": {
-                    "focus_entities": keywords.get("high_level", [])[:3],
-                    "follow_up_queries": [
-                        f"详细解释{entity}" for entity in keywords.get("high_level", [])[:2]
-                    ],
-                    "community_relevance": 0.8
-                },
-                "enhanced_keywords": keywords,
-                "community_insights": f"基于社区分析，查询涉及{len(keywords.get('high_level', []))}个高级概念"
-            }
-            
-            self._community_cache[cache_key] = community_context
-            return community_context
-            
-        except Exception as e:
-            print(f"社区感知增强失败: {e}")
-            return {"search_strategy": {}, "enhanced_keywords": keywords}
-    
-    def _build_dynamic_knowledge_graph(self, query: str) -> str:
-        """构建动态知识图谱"""
-        try:
-            cache_key = f"kg:{query}"
-            if cache_key in self._kg_cache:
-                return self._kg_cache[cache_key]
-            
-            # 从查询文本构建知识图谱
-            kg_graph_id = self.knowledge_builder.build_knowledge_graph_from_text(
-                query, 
-                source=f"query_{int(time.time())}"
-            )
-            
-            if kg_graph_id:
-                # 获取图谱摘要
-                kg_summary = self.knowledge_builder.get_knowledge_graph_summary(kg_graph_id)
-                self._log(f"构建知识图谱: {kg_summary.get('entities_count', 0)} 个实体, "
-                         f"{kg_summary.get('relations_count', 0)} 个关系")
-                
-                self._kg_cache[cache_key] = kg_graph_id
-            
-            return kg_graph_id
-            
-        except Exception as e:
-            print(f"知识图谱构建失败: {e}")
-            return ""
-    
-    def _execute_chain_exploration(self, query: str, keywords: Dict[str, List[str]]) -> str:
-        """执行链式探索"""
-        try:
-            # 使用高级关键词作为种子实体
-            seed_entities = keywords.get("high_level", [])[:3]
-            
-            if not seed_entities:
-                return ""
-            
-            # 开始探索
-            exploration_path_id = self.chain_explorer.start_exploration(query, seed_entities)
-            
-            # 执行几步探索
-            for step in range(3):
-                result = self.chain_explorer.explore_next_step(exploration_path_id)
-                if result["status"] in ["completed", "error"]:
-                    break
-                
-                self._log(f"探索步骤 {step + 1}: {result.get('new_nodes_count', 0)} 个新节点")
-            
-            # 获取探索摘要
-            exploration_summary = self.chain_explorer.get_exploration_summary(exploration_path_id)
-            self._log(f"链式探索完成: {exploration_summary.get('total_nodes', 0)} 个节点")
-            
-            return exploration_path_id
-            
-        except Exception as e:
-            print(f"链式探索失败: {e}")
-            return ""
-    
-    def _enhance_final_answer(self, query: str, base_result: str, complexity) -> str:
-        """增强最终答案"""
-        try:
-            # 如果基础结果已经很好，直接返回
-            if len(base_result) > 500 and "抱歉" not in base_result:
-                return base_result
-            
-            # 收集增强信息
-            enhancement_info = []
-            
-            # 添加复杂度分析
-            enhancement_info.append(f"查询复杂度分析: {complexity.complexity_level.value}")
-            
-            # 添加社区洞察
-            if hasattr(self, '_community_cache') and self._community_cache:
-                enhancement_info.append("已应用社区感知增强")
-            
-            # 添加知识图谱信息
-            if hasattr(self, '_kg_cache') and self._kg_cache:
-                enhancement_info.append("已构建动态知识图谱")
-            
-            # 生成增强答案
-            enhanced_query = f"""
-            基于以下增强分析，改进回答：
+        start_time = time.time()
 
-            原始问题: {query}
-            基础回答: {base_result}
-            增强信息: {'; '.join(enhancement_info)}
+        # 解析输入
+        if isinstance(query_input, dict) and "query" in query_input:
+            query = query_input["query"]
+            keywords = query_input.get("keywords", [])
+        else:
+            query = str(query_input)
+            keywords = []
 
-            请生成一个更全面、更深入的答案。
-            """
-            
-            enhanced_result = self.hybrid_tool.search(enhanced_query)
-            
-            return enhanced_result if enhanced_result else base_result
-            
-        except Exception as e:
-            print(f"答案增强失败: {e}")
-            return base_result
-    
-    async def search_stream(self, query: str) -> AsyncGenerator[str, None]:
-        """
-        流式执行增强深度研究
-        
-        参数:
-            query: 查询字符串
-            
-        返回:
-            AsyncGenerator[str, None]: 流式结果生成器
-        """
+        # 生成查询ID
+        query_id = f"deeper_research_{int(time.time())}"
+        self.current_query_context[query] = query_id
+
+        # 清空执行日志
+        self.execution_logs = []
+
         try:
-            yield "**开始增强深度分析**...\n\n"
-            
-            # 评估复杂度
-            complexity = self.complexity_estimator.estimate_complexity(query)
-            yield f"**复杂度评估**: {complexity.complexity_level.value}\n"
-            
-            if complexity.overall_complexity >= self.complexity_threshold:
-                yield "**激活增强研究模式**...\n\n"
-                
-                # 提取关键词
+            self._log(f"\n[增强版深度研究] 开始研究: {query}")
+
+            # 阶段1: 提取关键词
+            if not keywords:
                 keywords = self.extract_keywords(query)
-                yield f"**关键词提取**: {len(keywords.get('high_level', []))} 个高级概念\n"
-                
-                # 社区感知
-                if self.enable_community_aware:
-                    yield "**社区感知分析**...\n"
-                    community_context = self._enhance_search_with_community(query, keywords)
-                    yield "✓ 社区分析完成\n"
-                
-                # 知识图谱构建
-                if self.enable_kg_building:
-                    yield "**构建知识图谱**...\n"
-                    kg_graph_id = self._build_dynamic_knowledge_graph(query)
-                    yield "✓ 知识图谱构建完成\n"
-                
-                # 链式探索
-                if self.enable_chain_exploration and keywords.get("high_level"):
-                    yield "**链式探索搜索**...\n"
-                    exploration_path_id = self._execute_chain_exploration(query, keywords)
-                    yield "✓ 链式探索完成\n\n"
-            
-            yield "**生成最终答案**...\n\n"
-            
-            # 执行搜索
-            result = await asyncio.get_event_loop().run_in_executor(None, self.search, query)
-            
-            # 分块返回结果
-            import re
-            sentences = re.split(r'([.!?。！？]\s*)', result)
-            buffer = ""
-            
-            for i in range(len(sentences)):
-                buffer += sentences[i]
-                if i % 2 == 1 or len(buffer) >= 60:
-                    yield buffer
-                    buffer = ""
-                    await asyncio.sleep(0.02)
-            
-            if buffer:
-                yield buffer
-                
+
+            # 阶段2: 使用Chain of Exploration增强搜索
+            enhanced_context = self._enhance_search_with_coe(query, keywords)
+
+            # 阶段3: 创建多个推理分支
+            branch_results = self._create_multiple_reasoning_branches(query_id)
+
+            # 阶段4: 检测和解决矛盾
+            contradiction_analysis = self._detect_and_resolve_contradictions(query_id)
+
+            # 阶段5: 执行深度研究
+            research_result = self.deep_research.search(query)
+
+            # 阶段6: 生成引用
+            cited_result = self._generate_citations(research_result, query_id)
+
+            # 记录性能指标
+            self.performance_metrics["total_time"] = time.time() - start_time
+            self.performance_metrics["branches_created"] = len(branch_results)
+            self.performance_metrics["contradictions_found"] = len(contradiction_analysis.get("contradictions", []))
+
+            self._log(f"\n[增强版深度研究] 研究完成，用时 {self.performance_metrics['total_time']:.2f}秒")
+
+            return cited_result
+
         except Exception as e:
-            yield f"**增强深度研究失败**: {str(e)}"
-    
-    def get_tool(self) -> BaseTool:
-        """获取LangChain兼容的工具"""
-        class DeeperResearchRetrievalTool(BaseTool):
-            name: str = "deeper_research"
-            description: str = "增强版深度研究工具：通过社区感知和知识图谱分析，结合多轮推理和搜索解决复杂问题。"
-            
-            def _run(self_tool, query: Any) -> str:
-                return self.search(query)
-            
-            def _arun(self_tool, query: Any) -> str:
-                raise NotImplementedError("异步执行未实现")
-        
-        return DeeperResearchRetrievalTool()
-    
-    def get_stream_tool(self) -> BaseTool:
-        """获取流式工具"""
-        class DeeperResearchStreamTool(BaseTool):
-            name: str = "deeper_research_stream"
-            description: str = "增强版深度研究流式工具：支持流式输出的深度研究。"
-            
-            def _run(self_tool, query: Any) -> str:
-                # 同步版本，返回完整结果
-                return self.search(query)
-            
-            async def _arun(self_tool, query: Any) -> str:
-                # 异步版本，收集所有流式输出
-                result_parts = []
-                async for chunk in self.search_stream(str(query)):
-                    result_parts.append(chunk)
-                return "".join(result_parts)
-        
-        return DeeperResearchStreamTool()
-    
-    def close(self):
-        """关闭增强深度研究工具"""
-        try:
-            # 调用父类方法
-            super().close()
-            
-            # 关闭增强组件
-            if hasattr(self, 'complexity_estimator'):
-                self.complexity_estimator.close()
-            if hasattr(self, 'knowledge_builder'):
-                self.knowledge_builder.close()
-            if hasattr(self, 'chain_explorer'):
-                self.chain_explorer.close()
-            
-            # 清空缓存
-            self._community_cache.clear()
-            self._kg_cache.clear()
-                
-        except Exception as e:
-            print(f"增强深度研究工具关闭失败: {e}")
+            self._log(f"\n[增强版深度研究] 研究失败: {e}")
+            error_msg = f"增强版深度研究过程中出现问题: {str(e)}"
+
+            # 记录性能指标
+            self.performance_metrics["total_time"] = time.time() - start_time
+            self.performance_metrics["error"] = str(e)
+
+            return error_msg
+
+    def get_research_summary(self, query_id=None):
+        """
+        获取研究摘要
+
+        Args:
+            query_id: 查询ID，如果为None则使用最新的查询
+
+        Returns:
+            Dict: 研究摘要
+        """
+        if query_id is None:
+            # 获取最新的查询ID
+            if self.current_query_context:
+                query_id = list(self.current_query_context.values())[-1]
+            else:
+                return {"error": "没有找到查询记录"}
+
+        summary = {
+            "query_id": query_id,
+            "execution_logs": self.execution_logs,
+            "performance_metrics": self.performance_metrics,
+            "explored_branches": self.explored_branches,
+            "timestamp": time.time()
+        }
+
+        return summary

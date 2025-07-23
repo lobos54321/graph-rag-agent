@@ -1,21 +1,15 @@
-"""
-全局搜索实现
-
-基于Map-Reduce模式的跨社区查询
-"""
-
-from typing import List, Dict, Any, Optional
-import time
+from typing import List, Dict, Any
 from tqdm import tqdm
-
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from config.prompt import MAP_SYSTEM_PROMPT, REDUCE_SYSTEM_PROMPT
-from search_new.core.base_search import BaseSearch
+from config.neo4jdb import get_db_manager
+from search_new.config.search_config import search_config
+from search_new.utils.search_utils import SearchUtils
 
 
-class GlobalSearch(BaseSearch):
+class GlobalSearch:
     """
     全局搜索类：使用Neo4j和LangChain实现基于Map-Reduce模式的全局搜索功能
     
@@ -25,199 +19,72 @@ class GlobalSearch(BaseSearch):
     3. Reduce阶段：整合所有中间结果生成最终答案
     """
     
-    def __init__(self,
-                 llm=None,
-                 response_type: str = "多个段落",
-                 enable_cache: bool = True):
+    def __init__(self, llm=None, response_type: str = None):
         """
         初始化全局搜索类
-
+        
         参数:
-            llm: 大语言模型实例
-            response_type: 响应类型，默认为"多个段落"
-            enable_cache: 是否启用缓存
+            llm: 大语言模型实例，如果为None则从模型管理器获取
+            response_type: 响应类型，如果为None则使用配置中的默认值
         """
-        super().__init__(
-            llm=llm,
-            cache_dir=None,  # 将在父类中设置
-            enable_cache=enable_cache
-        )
+        # 初始化模型
+        if llm is None:
+            from model.get_models import get_llm_model
+            llm = get_llm_model()
+            
+        self.llm = llm
         
-        # 搜索配置
-        self.response_type = response_type
-        self.global_config = self.config.global_search
-
-        # 设置缓存目录（如果启用缓存且父类没有设置）
-        if enable_cache and (not hasattr(self, 'cache_manager') or self.cache_manager is None):
-            self._setup_cache(self.config.cache.global_search_cache_dir)
+        # 设置响应类型
+        self.response_type = response_type or search_config.get_response_type()
         
-        # 全局搜索参数
-        self.default_level = self.global_config.default_level
-        self.batch_size = self.global_config.batch_size
-        self.max_communities = self.global_config.max_communities
+        # 使用数据库连接管理
+        db_manager = get_db_manager()
+        self.graph = db_manager.get_graph()
         
-        print(f"全局搜索初始化完成，默认层级: {self.default_level}")
-    
-    def _get_community_data(self, level: int) -> List[Dict]:
+        # 从配置加载搜索参数
+        self._load_search_config()
+        
+    def _load_search_config(self):
+        """从配置加载搜索参数"""
+        global_config = search_config.get_global_search_config()
+        
+        self.default_level = global_config.get("default_level", 0)
+        self.batch_size = global_config.get("batch_size", 10)
+        self.max_communities = global_config.get("max_communities", 100)
+        
+    def _get_community_data(self, level: int) -> List[dict]:
         """
         获取指定层级的社区数据
-
-        参数:
-            level: 社区层级
-
-        返回:
-            List[Dict]: 社区数据字典列表
-        """
-        try:
-            # 首先检查指定层级是否有数据
-            check_cypher = """
-            MATCH (c:__Community__)
-            WHERE c.level = $level
-            RETURN count(*) as count
-            """
-
-            check_result = self._execute_db_query(check_cypher, {"level": level})
-            count = 0
-            # db_manager.execute_query返回的是pandas DataFrame
-            if hasattr(check_result, 'iloc') and len(check_result) > 0:
-                count = check_result.iloc[0]['count']
-            elif hasattr(check_result, 'data') and check_result.data():
-                count = check_result.data()[0]['count']
-            elif hasattr(check_result, 'to_dict'):
-                result_dict = check_result.to_dict()
-                if 'data' in result_dict and result_dict['data']:
-                    count = result_dict['data'][0]['count']
-            elif isinstance(check_result, list) and check_result:
-                count = check_result[0].get('count', 0)
-
-            print(f"获取到 {count} 个层级 {level} 的社区")
-
-            # 如果指定层级没有数据，尝试其他层级
-            if count == 0:
-                print(f"层级 {level} 没有数据，尝试查找其他层级...")
-                available_levels_cypher = """
-                MATCH (c:__Community__)
-                RETURN DISTINCT c.level as level, count(*) as count
-                ORDER BY c.level
-                """
-
-                levels_result = self._execute_db_query(available_levels_cypher, {})
-                available_levels = []
-
-                # db_manager.execute_query返回的是pandas DataFrame
-                if hasattr(levels_result, 'to_dict') and hasattr(levels_result, 'iloc'):
-                    # 转换DataFrame为字典列表
-                    available_levels = levels_result.to_dict('records')
-                elif hasattr(levels_result, 'data'):
-                    available_levels = levels_result.data()
-                elif hasattr(levels_result, 'to_dict'):
-                    result_dict = levels_result.to_dict()
-                    if 'data' in result_dict:
-                        available_levels = result_dict['data']
-                elif isinstance(levels_result, list):
-                    available_levels = levels_result
-
-                if available_levels:
-                    print("可用的社区层级:")
-                    for level_info in available_levels:
-                        print(f"  层级 {level_info.get('level', 'N/A')}: {level_info.get('count', 0)} 个社区")
-
-                    # 使用第一个可用层级
-                    level = available_levels[0].get('level', level)
-                    print(f"使用层级 {level} 进行搜索")
-                else:
-                    print("没有找到任何社区数据")
-                    return []
-
-            # 获取社区数据（简化查询）
-            cypher = """
-            MATCH (c:__Community__)
-            WHERE c.level = $level
-            RETURN {communityId:c.id, full_content:coalesce(c.full_content, c.summary, c.title, '无内容')} AS output
-            LIMIT $max_communities
-            """
-
-            result = self._execute_db_query(cypher, {
-                "level": level,
-                "max_communities": self.max_communities
-            })
-            
-            # 转换结果格式
-            communities = []
-            # db_manager.execute_query返回的是pandas DataFrame
-            if hasattr(result, 'iloc') and len(result) > 0:
-                communities = result['output'].tolist()
-            elif hasattr(result, 'data'):
-                communities = [record['output'] for record in result.data()]
-            elif hasattr(result, 'to_dict'):
-                result_dict = result.to_dict()
-                if 'data' in result_dict:
-                    communities = [record['output'] for record in result_dict['data']]
-            else:
-                # 处理其他格式
-                if hasattr(result, 'iterrows'):
-                    communities = [row['output'] for _, row in result.iterrows()]
-                else:
-                    communities = result if isinstance(result, list) else []
-            
-            print(f"获取到 {len(communities)} 个层级 {level} 的社区")
-            return communities
-            
-        except Exception as e:
-            print(f"获取社区数据失败: {e}")
-            return []
-    
-    def _process_single_community(self, query: str, community: Dict) -> str:
-        """
-        处理单个社区数据（Map阶段）
         
         参数:
-            query: 搜索查询字符串
-            community: 社区数据字典
+            level: 社区层级
             
         返回:
-            str: 该社区的中间结果
+            List[dict]: 社区数据字典列表
         """
         try:
-            # 创建Map阶段的提示模板
-            map_prompt = ChatPromptTemplate.from_messages([
-                ("system", MAP_SYSTEM_PROMPT),
-                ("human", """
-                    ---社区数据---
-                    {community_data}
-
-                    用户的问题是：
-                    {question}
-                    
-                    请基于这个社区的数据，提供与问题相关的信息摘要。
-                    如果社区数据与问题无关，请回答"无相关信息"。
-                    """),
-            ])
+            # 限制社区数量以避免性能问题
+            result = self.graph.query(
+                """
+                MATCH (c:__Community__)
+                WHERE c.level = $level
+                RETURN {communityId:c.id, full_content:c.full_content} AS output
+                ORDER BY c.weight DESC
+                LIMIT $max_communities
+                """,
+                params={"level": level, "max_communities": self.max_communities},
+            )
             
-            # 创建Map阶段的处理链
-            map_chain = map_prompt | self.llm | StrOutputParser()
-            
-            # 处理社区数据
-            community_content = community.get('full_content', '')
-            if not community_content:
-                return "无相关信息"
-            
-            # 生成中间结果
-            intermediate_result = map_chain.invoke({
-                "community_data": community_content,
-                "question": query,
-                "response_type": self.response_type,
-            })
-            
-            return intermediate_result.strip()
+            print(f"[GlobalSearch] 获取到 {len(result)} 个层级 {level} 的社区")
+            return result
             
         except Exception as e:
-            print(f"处理社区数据失败: {e}")
-            return "处理失败"
+            print(f"[GlobalSearch] 获取社区数据失败: {e}")
+            return []
     
-    def _process_communities(self, query: str, communities: List[Dict]) -> List[str]:
+    def _process_communities(self, query: str, communities: List[dict]) -> List[str]:
         """
-        批量处理社区数据（Map阶段）
+        处理社区数据生成中间结果（Map阶段）
         
         参数:
             query: 搜索查询字符串
@@ -227,26 +94,65 @@ class GlobalSearch(BaseSearch):
             List[str]: 中间结果列表
         """
         if not communities:
-            print("没有社区数据需要处理")
             return []
-        
-        intermediate_results = []
-        
-        # 使用进度条显示处理进度
-        for community in tqdm(communities, desc="处理社区数据"):
-            try:
-                result = self._process_single_community(query, community)
+            
+        # 设置Map阶段的提示模板
+        map_prompt = ChatPromptTemplate.from_messages([
+            ("system", MAP_SYSTEM_PROMPT),
+            ("human", """
+                ---数据表格--- 
+                {context_data}
                 
-                # 过滤无效结果
-                if result and result.strip() and result.strip() != "无相关信息":
-                    intermediate_results.append(result)
-                    
-            except Exception as e:
-                print(f"处理社区失败: {e}")
-                continue
+                用户的问题是：
+                {question}
+                """),
+        ])
         
-        print(f"成功处理 {len(intermediate_results)} 个社区的数据")
-        return intermediate_results
+        # 创建Map阶段的处理链
+        map_chain = map_prompt | self.llm | StrOutputParser()
+        
+        # 批量处理社区
+        results = []
+        total_communities = len(communities)
+        
+        print(f"[GlobalSearch] 开始处理 {total_communities} 个社区...")
+        
+        # 分批处理以提高效率
+        for i in range(0, total_communities, self.batch_size):
+            batch = communities[i:i + self.batch_size]
+            batch_results = []
+            
+            for community in tqdm(batch, desc=f"处理批次 {i//self.batch_size + 1}"):
+                try:
+                    # 获取社区内容
+                    community_data = community.get("output", {})
+                    
+                    # 如果社区内容为空，跳过
+                    if not community_data or not community_data.get("full_content"):
+                        continue
+                    
+                    # 调用LLM处理社区数据
+                    response = map_chain.invoke({
+                        "question": query,
+                        "context_data": community_data
+                    })
+                    
+                    # 验证响应
+                    if SearchUtils.validate_search_result(response):
+                        batch_results.append(response)
+                        print(f"[GlobalSearch] 社区 {community_data.get('communityId', 'unknown')} 处理完成")
+                    else:
+                        print(f"[GlobalSearch] 社区 {community_data.get('communityId', 'unknown')} 响应无效，跳过")
+                        
+                except Exception as e:
+                    print(f"[GlobalSearch] 处理社区失败: {e}")
+                    continue
+            
+            results.extend(batch_results)
+            print(f"[GlobalSearch] 批次 {i//self.batch_size + 1} 完成，获得 {len(batch_results)} 个有效结果")
+        
+        print(f"[GlobalSearch] Map阶段完成，共获得 {len(results)} 个中间结果")
+        return results
     
     def _reduce_results(self, query: str, intermediate_results: List[str]) -> str:
         """
@@ -257,27 +163,27 @@ class GlobalSearch(BaseSearch):
             intermediate_results: 中间结果列表
             
         返回:
-            str: 最终生成的答案
+            str: 最终答案
         """
         if not intermediate_results:
-            return "抱歉，我无法在知识库中找到相关信息来回答您的问题。"
+            return "抱歉，未能找到相关信息来回答您的问题。"
+        
+        # 如果只有一个结果，直接返回
+        if len(intermediate_results) == 1:
+            return intermediate_results[0]
         
         try:
             # 设置Reduce阶段的提示模板
             reduce_prompt = ChatPromptTemplate.from_messages([
                 ("system", REDUCE_SYSTEM_PROMPT),
                 ("human", """
-                    ---分析报告--- 
-                    {report_data}
-
+                    ---中间分析结果--- 
+                    {context_data}
+                    
                     用户的问题是：
                     {question}
                     
-                    请基于以上分析报告，生成一个全面、准确的答案。
-                    请按以下格式输出：
-                    1. 使用三级标题(###)标记主题
-                    2. 主要内容用清晰的段落展示
-                    3. 最后必须用"#### 引用数据"标记引用部分，列出用到的数据来源
+                    请基于以上分析结果，生成一个综合性的回答。
                     """),
             ])
             
@@ -285,130 +191,157 @@ class GlobalSearch(BaseSearch):
             reduce_chain = reduce_prompt | self.llm | StrOutputParser()
             
             # 合并中间结果
-            report_data = "\n\n".join([
-                f"**报告 {i+1}:**\n{result}" 
+            combined_context = "\n\n".join([
+                f"### 分析结果 {i+1}\n{result}" 
                 for i, result in enumerate(intermediate_results)
             ])
             
-            # 生成最终答案
-            final_answer = reduce_chain.invoke({
-                "report_data": report_data,
+            # 截断过长的上下文
+            combined_context = SearchUtils.truncate_text(combined_context, max_length=8000)
+            
+            # 调用LLM生成最终答案
+            final_response = reduce_chain.invoke({
                 "question": query,
-                "response_type": self.response_type,
+                "context_data": combined_context,
+                "response_type": self.response_type
             })
             
-            return final_answer
+            # 验证最终响应
+            if not SearchUtils.validate_search_result(final_response):
+                # 如果最终响应无效，返回最好的中间结果
+                return max(intermediate_results, key=len)
+            
+            return final_response
             
         except Exception as e:
-            print(f"结果整合失败: {e}")
-            return f"结果整合过程中出现问题: {str(e)}"
+            print(f"[GlobalSearch] Reduce阶段失败: {e}")
+            # 返回最长的中间结果作为备选
+            return max(intermediate_results, key=len) if intermediate_results else "搜索过程中出现问题。"
     
-    def search(self, query: str, level: Optional[int] = None, **kwargs) -> str:
+    def search(self, query: str, level: int = None) -> str:
         """
         执行全局搜索
         
         参数:
             query: 搜索查询字符串
             level: 要搜索的社区层级，如果为None则使用默认层级
-            **kwargs: 其他参数
             
         返回:
             str: 生成的最终答案
         """
-        overall_start = time.time()
-        self._reset_metrics()
+        # 清理查询
+        query = SearchUtils.clean_search_query(query)
         
         # 使用默认层级
         if level is None:
             level = self.default_level
         
+        print(f"[GlobalSearch] 开始全局搜索，查询: '{query}', 层级: {level}")
+        
         try:
-            # 生成缓存键
-            cache_key = self._get_cache_key(query, level=level, **kwargs)
-            
-            # 检查缓存
-            cached_result = self._get_from_cache(cache_key)
-            if cached_result is not None:
-                print(f"全局搜索缓存命中: {query[:50]}...")
-                return cached_result
-            
-            print(f"开始全局搜索: {query[:100]}..., 层级: {level}")
-            
             # 获取社区数据
             communities = self._get_community_data(level)
+            
             if not communities:
-                result = "抱歉，未找到相关的社区数据。"
-                self._set_to_cache(cache_key, result)
-                return result
+                return "抱歉，未能找到相关的社区信息来回答您的问题。"
             
             # 处理社区数据（Map阶段）
             intermediate_results = self._process_communities(query, communities)
             
+            if not intermediate_results:
+                return "抱歉，未能从社区数据中提取到相关信息。"
+            
             # 生成最终答案（Reduce阶段）
             final_answer = self._reduce_results(query, intermediate_results)
             
-            # 缓存结果
-            self._set_to_cache(cache_key, final_answer)
-            
-            # 记录总时间
-            self.performance_metrics["total_time"] = time.time() - overall_start
-            
-            print(f"全局搜索完成，耗时: {self.performance_metrics['total_time']:.2f}s")
-            
+            print(f"[GlobalSearch] 全局搜索完成")
             return final_answer
             
         except Exception as e:
-            print(f"全局搜索失败: {e}")
-            self.error_stats["query_errors"] += 1
-            self.performance_metrics["total_time"] = time.time() - overall_start
-            
+            print(f"[GlobalSearch] 全局搜索失败: {e}")
             return f"搜索过程中出现问题: {str(e)}"
     
-    def search_with_details(self, query: str, level: Optional[int] = None, **kwargs) -> Dict[str, Any]:
+    def search_with_map_only(self, query: str, level: int = None) -> List[str]:
         """
-        执行全局搜索并返回详细信息
+        只执行Map阶段，返回中间结果列表
         
         参数:
             query: 搜索查询字符串
-            level: 社区层级
-            **kwargs: 其他参数
+            level: 要搜索的社区层级
             
         返回:
-            Dict: 包含搜索结果和详细信息的字典
+            List[str]: 中间结果列表
         """
-        start_time = time.time()
+        # 清理查询
+        query = SearchUtils.clean_search_query(query)
         
+        # 使用默认层级
+        if level is None:
+            level = self.default_level
+        
+        print(f"[GlobalSearch] 开始Map阶段搜索，查询: '{query}', 层级: {level}")
+        
+        try:
+            # 获取社区数据
+            communities = self._get_community_data(level)
+            
+            if not communities:
+                return []
+            
+            # 处理社区数据（仅Map阶段）
+            intermediate_results = self._process_communities(query, communities)
+            
+            print(f"[GlobalSearch] Map阶段完成，获得 {len(intermediate_results)} 个结果")
+            return intermediate_results
+            
+        except Exception as e:
+            print(f"[GlobalSearch] Map阶段搜索失败: {e}")
+            return []
+    
+    def get_community_summary(self, level: int = None) -> Dict[str, Any]:
+        """
+        获取社区摘要信息
+        
+        参数:
+            level: 社区层级
+            
+        返回:
+            Dict[str, Any]: 社区摘要信息
+        """
         if level is None:
             level = self.default_level
         
         try:
-            # 执行搜索
-            result = self.search(query, level, **kwargs)
+            result = self.graph.query(
+                """
+                MATCH (c:__Community__)
+                WHERE c.level = $level
+                RETURN count(c) as total_communities,
+                       avg(c.weight) as avg_weight,
+                       max(c.weight) as max_weight,
+                       min(c.weight) as min_weight
+                """,
+                params={"level": level}
+            )
             
-            # 获取社区数据
-            communities = self._get_community_data(level)
-            
-            return {
-                "result": result,
-                "communities_count": len(communities),
-                "level": level,
-                "performance": self.get_performance_metrics(),
-                "config": {
-                    "default_level": self.default_level,
-                    "batch_size": self.batch_size,
-                    "max_communities": self.max_communities,
-                    "response_type": self.response_type
-                },
-                "total_time": time.time() - start_time
-            }
-            
+            if result:
+                return result[0]
+            else:
+                return {}
+                
         except Exception as e:
-            print(f"详细搜索失败: {e}")
-            return {
-                "result": f"搜索失败: {str(e)}",
-                "communities_count": 0,
-                "level": level,
-                "performance": self.get_performance_metrics(),
-                "error": str(e),
-                "total_time": time.time() - start_time
-            }
+            print(f"[GlobalSearch] 获取社区摘要失败: {e}")
+            return {}
+    
+    def close(self):
+        """关闭资源连接"""
+        # 连接由数据库管理器管理，这里不需要手动关闭
+        pass
+            
+    def __enter__(self):
+        """上下文管理器入口"""
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """上下文管理器出口"""
+        self.close()

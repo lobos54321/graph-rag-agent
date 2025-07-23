@@ -203,4 +203,23 @@ REASONING_CONFIG = {
     # 证据链配置
     "max_evidence_items": 50,
     "evidence_relevance_threshold": 0.7,
+
+    # 验证配置
+    "validation": {
+        "enable_answer_validation": True,
+        "validation_threshold": 0.8,
+        "enable_complexity_estimation": True,
+        "consistency_threshold": 0.7
+    },
+
+    # 探索配置
+    "exploration": {
+        "max_exploration_steps": 5,
+        "exploration_depth": 3,
+        "exploration_breadth": 3,
+        "exploration_width": 3,
+        "relevance_threshold": 0.5,
+        "exploration_decay_factor": 0.8,
+        "enable_backtracking": True
+    }
 }

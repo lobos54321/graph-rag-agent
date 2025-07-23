@@ -1,102 +1,59 @@
-"""
-搜索模块重构版本
-
-提供高质量、可维护的搜索功能实现
-"""
-
 # 核心搜索类
-from .core import BaseSearch, LocalSearch, GlobalSearch
+from search_new.core.local_search import LocalSearch
+from search_new.core.global_search import GlobalSearch
 
 # 搜索工具类
-from .tools import (
-    BaseSearchTool,
-    LocalSearchTool,
-    GlobalSearchTool,
-    HybridSearchTool,
-    NaiveSearchTool,
-    DeepResearchTool,
-    DeeperResearchTool
-)
-
-# 配置管理
-from .config import (
-    SearchConfig,
-    ReasoningConfig,
-    get_search_config,
-    get_reasoning_config
-)
+from search_new.tools.local_tool import LocalSearchTool
+from search_new.tools.global_tool import GlobalSearchTool
+from search_new.tools.hybrid_tool import HybridSearchTool
+from search_new.tools.naive_search_tool import NaiveSearchTool
+from search_new.tools.deep_research_tool import DeepResearchTool
+from search_new.tools.deeper_research_tool import DeeperResearchTool
 
 # 推理组件
-from .reasoning import (
-    ThinkingEngine,
-    QueryGenerator,
-    EvidenceTracker,
-    DualPathSearcher,
-    ChainedExploration,
-    AnswerValidator,
-    ComplexityEstimator
-)
+from search_new.reasoning.engines.thinking_engine import ThinkingEngine
+from search_new.reasoning.engines.search_engine import DualPathSearcher, QueryGenerator
+from search_new.reasoning.engines.validator import AnswerValidator
+from search_new.reasoning.enhancers.community_enhancer import CommunityAwareSearchEnhancer
 
-# 流式处理
-from .streaming import (
-    StreamProcessor,
-    AsyncIteratorCallbackHandler,
-    AsyncStreamManager,
-    get_stream_processor,
-    get_async_stream_manager
-)
+# 工具类
+from search_new.utils.vector_utils import VectorUtils
+from search_new.utils.search_utils import SearchUtils
+from search_new.reasoning.nlp.text_processor import TextProcessor
+from search_new.reasoning.prompts.prompt_manager import PromptManager
 
-# 工具函数
-from .utils import (
-    VectorUtils,
-    PerformanceMonitor,
-    get_performance_monitor
-)
+# 配置
+from search_new.config.search_config import SearchConfig, search_config
+
+__version__ = "2.0.0"
 
 __all__ = [
     # 核心搜索类
-    "BaseSearch",
     "LocalSearch",
     "GlobalSearch",
-
+    
     # 搜索工具类
-    "BaseSearchTool",
     "LocalSearchTool",
     "GlobalSearchTool",
     "HybridSearchTool",
     "NaiveSearchTool",
     "DeepResearchTool",
     "DeeperResearchTool",
-
-    # 配置管理
-    "SearchConfig",
-    "ReasoningConfig",
-    "get_search_config",
-    "get_reasoning_config",
-
+    
     # 推理组件
     "ThinkingEngine",
-    "QueryGenerator",
-    "EvidenceTracker",
     "DualPathSearcher",
-    "ChainedExploration",
+    "QueryGenerator", 
     "AnswerValidator",
-    "ComplexityEstimator",
-
-    # 流式处理
-    "StreamProcessor",
-    "AsyncIteratorCallbackHandler",
-    "AsyncStreamManager",
-    "get_stream_processor",
-    "get_async_stream_manager",
-
-    # 工具函数
+    "CommunityAwareSearchEnhancer",
+    
+    # 工具类
     "VectorUtils",
-    "PerformanceMonitor",
-    "get_performance_monitor"
+    "SearchUtils",
+    "TextProcessor",
+    "PromptManager",
+    
+    # 配置
+    "SearchConfig",
+    "search_config"
 ]
-
-# 版本信息
-__version__ = "2.0.0"
-__author__ = "GraphRAG Agent Team"
-__description__ = "重构后的搜索模块，提供高质量、可维护的搜索功能"

@@ -1,91 +1,24 @@
-"""
-推理模块
+# 推理组件模块初始化文件
 
-提供完整的推理功能，包括思考引擎、搜索组件、验证组件等
-"""
-
-# 核心推理组件
-from .core import (
-    ThinkingEngine,
-    ThinkingStep,
-    ThinkingSession,
-    QueryGenerator,
-    QueryContext,
-    EvidenceTracker,
-    Evidence,
-    ReasoningStep,
-    EvidenceChain
-)
-
-# 推理搜索组件
-from .search import (
-    DualPathSearcher,
-    ChainedExploration,
-    ExplorationNode,
-    ExplorationPath
-)
-
-# 验证组件
-from .validation import (
-    AnswerValidator,
-    ValidationResult,
-    AnswerQuality,
-    ComplexityEstimator,
-    ComplexityMetrics,
-    ComplexityLevel
-)
-
-# 工具函数
-from .utils import (
-    clean_text,
-    extract_queries_from_text,
-    extract_keywords,
-    extract_entities,
-    PromptTemplates,
-    get_prompt_templates,
-    get_prompt,
-    KnowledgeGraphBuilder,
-    KGEntity,
-    KGRelation,
-    KnowledgeGraph
-)
+from search_new.reasoning.nlp.text_processor import TextProcessor
+from search_new.reasoning.prompts.prompt_manager import PromptManager
+from search_new.reasoning.engines.thinking_engine import ThinkingEngine
+from search_new.reasoning.engines.search_engine import DualPathSearcher, QueryGenerator
+from search_new.reasoning.engines.validator import AnswerValidator
+from search_new.reasoning.enhancers.community_enhancer import CommunityAwareSearchEnhancer
+from search_new.reasoning.enhancers.kg_builder import DynamicKnowledgeGraphBuilder
+from search_new.reasoning.enhancers.evidence_tracker import EvidenceChainTracker
+from search_new.reasoning.enhancers.exploration_chain import ChainOfExplorationSearcher
 
 __all__ = [
-    # 核心推理组件
+    "TextProcessor",
+    "PromptManager", 
     "ThinkingEngine",
-    "ThinkingStep",
-    "ThinkingSession",
-    "QueryGenerator",
-    "QueryContext",
-    "EvidenceTracker",
-    "Evidence",
-    "ReasoningStep",
-    "EvidenceChain",
-
-    # 推理搜索组件
     "DualPathSearcher",
-    "ChainedExploration",
-    "ExplorationNode",
-    "ExplorationPath",
-
-    # 验证组件
+    "QueryGenerator",
     "AnswerValidator",
-    "ValidationResult",
-    "AnswerQuality",
-    "ComplexityEstimator",
-    "ComplexityMetrics",
-    "ComplexityLevel",
-
-    # 工具函数
-    "clean_text",
-    "extract_queries_from_text",
-    "extract_keywords",
-    "extract_entities",
-    "PromptTemplates",
-    "get_prompt_templates",
-    "get_prompt",
-    "KnowledgeGraphBuilder",
-    "KGEntity",
-    "KGRelation",
-    "KnowledgeGraph"
+    "CommunityAwareSearchEnhancer",
+    "DynamicKnowledgeGraphBuilder",
+    "EvidenceChainTracker",
+    "ChainOfExplorationSearcher"
 ]
