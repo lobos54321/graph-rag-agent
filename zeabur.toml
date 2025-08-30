@@ -1,0 +1,36 @@
+[build]
+# 使用Docker构建
+dockerfile = "Dockerfile"
+
+[deploy]
+# 部署配置
+port = 8000
+healthcheck = "/api/graphrag/health"
+
+[services.graphrag-agent]
+# GraphRAG Agent 主服务
+build_command = "pip install -r requirements.txt && pip install -e ."
+start_command = "python server/main.py"
+
+[services.neo4j]
+# Neo4j 数据库服务
+image = "neo4j:5.15"
+ports = ["7474", "7687"]
+
+[env]
+# 环境变量配置
+PYTHONPATH = "/app"
+PYTHONUNBUFFERED = "1"
+OPENAI_BASE_URL = "https://api.openai.com/v1"
+OPENAI_EMBEDDINGS_MODEL = "text-embedding-3-large"
+OPENAI_LLM_MODEL = "gpt-4o-mini"
+TEMPERATURE = "0"
+MAX_TOKENS = "2000"
+VERBOSE = "true"
+CACHE_EMBEDDING_PROVIDER = "openai"
+LANGSMITH_TRACING = "false"
+
+# Neo4j 配置（将由Zeabur自动设置）
+NEO4J_URI = "${NEO4J_URI}"
+NEO4J_USERNAME = "${NEO4J_USERNAME}"
+NEO4J_PASSWORD = "${NEO4J_PASSWORD}"

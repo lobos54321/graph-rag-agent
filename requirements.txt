@@ -1,7 +1,7 @@
 aiohttp==3.8.5
 chardet==3.0.4 
 fastapi==0.115.11
-faiss-cpu==1.11.0
+faiss-cpu>=1.7.0
 google-auth==2.38.0
 graphdatascience==1.12
 hanlp==2.1.1
