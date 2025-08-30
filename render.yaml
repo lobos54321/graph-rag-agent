@@ -2,7 +2,6 @@ services:
   - type: web
     name: graphrag-agent
     env: docker
-    dockerfilePath: ./Dockerfile.render
     plan: free
     region: oregon
     buildCommand: ""

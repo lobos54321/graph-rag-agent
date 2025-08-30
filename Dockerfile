@@ -1,59 +1,40 @@
-# 多阶段构建，减少最终镜像大小
-FROM python:3.10-alpine as builder
-
-# 安装构建依赖
-RUN apk add --no-cache \
-    gcc \
-    musl-dev \
-    libffi-dev \
-    openssl-dev \
-    python3-dev \
-    build-base
-
-# 设置工作目录
-WORKDIR /build
-
-# 复制并安装Python依赖到虚拟环境
-COPY requirements.minimal.txt requirements.txt
-RUN python -m venv /opt/venv && \
-    /opt/venv/bin/pip install --upgrade pip && \
-    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
-
-# 生产阶段
-FROM python:3.10-alpine
-
-# 安装运行时依赖（最小化）
-RUN apk add --no-cache \
-    curl \
-    poppler-utils \
-    && rm -rf /var/cache/apk/*
-
-# 从构建阶段复制虚拟环境
-COPY --from=builder /opt/venv /opt/venv
+# Render优化的Dockerfile - 功能完整版
+FROM python:3.10-slim
 
 # 设置环境变量
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
-ENV PATH="/opt/venv/bin:$PATH"
+ENV PIP_NO_CACHE_DIR=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# 安装系统依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    poppler-utils \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # 设置工作目录
 WORKDIR /app
 
-# 复制应用代码（仅必要文件）
-COPY server/ ./server/
-COPY graph_rag/ ./graph_rag/
-COPY *.py ./
-COPY setup.py ./
+# 复制requirements文件
+COPY requirements.txt .
+
+# 安装Python依赖
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 复制应用代码
+COPY . .
+
+# 安装项目
+RUN pip install -e . --no-deps
 
 # 创建必要目录
-RUN mkdir -p cache files
+RUN mkdir -p cache files graph_data
 
-# 暴露端口
-EXPOSE 8000
+# Render自动分配端口，使用环境变量
+EXPOSE $PORT
 
-# 健康检查
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8000/api/graphrag/health || exit 1
-
-# 启动命令
-CMD ["python", "server/main.py"]
+# 启动命令 - 使用Render的PORT环境变量
+CMD ["sh", "-c", "python -m uvicorn server.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
