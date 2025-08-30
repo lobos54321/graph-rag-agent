@@ -50,7 +50,7 @@ async def health_check():
     }
 
 @app.post("/api/graphrag/analyze")
-async def analyze_document(request: dict):
+async def analyze_document():
     """文档分析端点"""
     try:
         # 模拟GraphRAG分析结果
@@ -66,20 +66,33 @@ async def analyze_document(request: dict):
             "service_ready": True
         }
     except Exception as e:
-        return {
-            "status": "error",
-            "message": f"分析失败: {str(e)}",
-            "service_ready": False
-        }
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": f"分析失败: {str(e)}",
+                "service_ready": False
+            }
+        )
 
 @app.post("/api/chat")
 async def chat():
-    """对话端点 - 临时实现"""
-    return {
-        "status": "success", 
-        "message": "Chat endpoint - coming soon",
-        "service_ready": True
-    }
+    """对话端点"""
+    try:
+        return {
+            "status": "success", 
+            "response": "GraphRAG智能对话功能正在开发中，敬请期待！",
+            "service_ready": True
+        }
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": f"对话失败: {str(e)}",
+                "service_ready": False
+            }
+        )
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
