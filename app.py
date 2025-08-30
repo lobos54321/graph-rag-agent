@@ -75,63 +75,81 @@ def extract_text_from_file(content: bytes, filename: str) -> str:
 async def analyze_with_openai(text_content: str, filename: str) -> dict:
     """使用OpenAI进行真正的AI内容分析"""
     try:
-        # 设置OpenAI API key
-        openai.api_key = os.getenv('OPENAI_API_KEY')
+        from openai import OpenAI
+        
+        # 获取API key并检查
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            print("❌ OPENAI_API_KEY环境变量未设置")
+            raise Exception("OPENAI_API_KEY未设置")
+            
+        print(f"✅ 使用OpenAI API Key: {api_key[:10]}...{api_key[-4:]}")
+        
+        # 创建OpenAI客户端
+        client = OpenAI(api_key=api_key)
         
         # 限制内容长度，避免token超限
-        if len(text_content) > 8000:
-            text_content = text_content[:8000] + "..."
+        if len(text_content) > 6000:
+            text_content = text_content[:6000] + "..."
+            
+        print(f"📝 准备发送给OpenAI的文本长度: {len(text_content)} 字符")
             
         prompt = f"""
 请分析以下文档内容，并以JSON格式返回分析结果：
 
 文档名称: {filename}
 文档内容:
-{text_content}
+{text_content[:3000]}
 
 请返回以下格式的JSON：
 {{
-    "content": "文档内容的详细摘要(150字以内)",
-    "concepts": ["提取的关键概念1", "概念2", "概念3", "概念4"],
-    "entities": ["重要实体1", "实体2", "实体3", "实体4"],
-    "knowledgeTreeSuggestion": "建议的知识树分类路径(如:技术文档/AI开发/系统架构)",
+    "content": "文档内容的详细摘要(100字以内)",
+    "concepts": ["提取的关键概念1", "概念2", "概念3"],
+    "entities": ["重要实体1", "实体2", "实体3"],
+    "knowledgeTreeSuggestion": "建议的知识树分类路径",
     "confidence": 0.9
 }}
 
-注意：
-1. 请基于文档的实际内容进行分析，不要只依赖文件名
-2. 概念和实体要从文档内容中真实提取
-3. 知识树建议要准确反映文档的主题分类
-4. 置信度为0-1之间的数字
+注意：请基于文档的实际内容进行分析，返回纯JSON格式。
 """
 
-        response = openai.chat.completions.create(
+        response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "你是一个专业的文档分析助手，擅长提取文档的核心内容、概念和实体。"},
+                {"role": "system", "content": "你是一个专业的文档分析助手。请分析文档内容并返回JSON格式结果。"},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.1,
-            max_tokens=800
+            max_tokens=500
         )
         
         result_text = response.choices[0].message.content
-        print(f"🤖 OpenAI分析结果: {result_text}")
+        print(f"🤖 OpenAI原始响应: {result_text[:200]}...")
         
-        # 解析JSON响应
+        # 清理和解析JSON响应
         import json
-        result = json.loads(result_text)
+        # 移除可能的markdown代码块标记
+        clean_text = result_text.strip()
+        if clean_text.startswith('```json'):
+            clean_text = clean_text[7:]
+        if clean_text.endswith('```'):
+            clean_text = clean_text[:-3]
+        clean_text = clean_text.strip()
+        
+        result = json.loads(clean_text)
+        print(f"✅ AI分析成功，返回结果: {result}")
         return result
         
     except Exception as e:
-        print(f"❌ OpenAI分析失败: {e}")
+        print(f"❌ OpenAI分析详细错误: {str(e)}")
+        print(f"❌ 错误类型: {type(e).__name__}")
         # 回退到基础分析
         return {
-            "content": f"基于AI分析的文档摘要生成失败，文档名称：{filename}",
-            "concepts": ["文档分析", "内容提取"],
-            "entities": ["AI系统", "用户"],
-            "knowledgeTreeSuggestion": "文档管理/AI分析/待处理",
-            "confidence": 0.6
+            "content": f"AI分析遇到技术问题，文档已接收: {filename}。系统正在处理中，请稍后重试。",
+            "concepts": ["文档处理", "技术问题", "待重试"],
+            "entities": ["系统", "文档", "用户"],
+            "knowledgeTreeSuggestion": "文档管理/待处理/技术问题",
+            "confidence": 0.5
         }
 
 @app.post("/api/graphrag/analyze")
