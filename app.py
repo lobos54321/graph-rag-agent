@@ -75,7 +75,8 @@ def extract_text_from_file(content: bytes, filename: str) -> str:
 async def analyze_with_openai(text_content: str, filename: str) -> dict:
     """使用OpenAI进行真正的AI内容分析"""
     try:
-        from openai import OpenAI
+        import requests
+        import json
         
         # 获取API key并检查
         api_key = os.getenv('OPENAI_API_KEY')
@@ -85,50 +86,52 @@ async def analyze_with_openai(text_content: str, filename: str) -> dict:
             
         print(f"✅ 使用OpenAI API Key: {api_key[:10]}...{api_key[-4:]}")
         
-        # 创建OpenAI客户端
-        client = OpenAI(api_key=api_key)
-        
         # 限制内容长度，避免token超限
-        if len(text_content) > 6000:
-            text_content = text_content[:6000] + "..."
+        if len(text_content) > 3000:
+            text_content = text_content[:3000] + "..."
             
         print(f"📝 准备发送给OpenAI的文本长度: {len(text_content)} 字符")
             
-        prompt = f"""
-请分析以下文档内容，并以JSON格式返回分析结果：
+        prompt = f"""请分析以下文档内容，并返回JSON格式结果：
 
-文档名称: {filename}
-文档内容:
-{text_content[:3000]}
+文档: {filename}
+内容: {text_content}
 
-请返回以下格式的JSON：
-{{
-    "content": "文档内容的详细摘要(100字以内)",
-    "concepts": ["提取的关键概念1", "概念2", "概念3"],
-    "entities": ["重要实体1", "实体2", "实体3"],
-    "knowledgeTreeSuggestion": "建议的知识树分类路径",
-    "confidence": 0.9
-}}
+返回格式：
+{{"content": "文档摘要", "concepts": ["概念1", "概念2"], "entities": ["实体1", "实体2"], "knowledgeTreeSuggestion": "分类路径", "confidence": 0.9}}"""
 
-注意：请基于文档的实际内容进行分析，返回纯JSON格式。
-"""
-
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "你是一个专业的文档分析助手。请分析文档内容并返回JSON格式结果。"},
+        # 直接使用requests调用OpenAI API
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "model": "gpt-4o-mini",
+            "messages": [
+                {"role": "system", "content": "你是专业文档分析助手，返回纯JSON格式结果。"},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.1,
-            max_tokens=500
+            "temperature": 0.1,
+            "max_tokens": 400
+        }
+        
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers,
+            json=data,
+            timeout=30
         )
         
-        result_text = response.choices[0].message.content
-        print(f"🤖 OpenAI原始响应: {result_text[:200]}...")
+        if response.status_code != 200:
+            print(f"❌ OpenAI API响应错误: {response.status_code} - {response.text}")
+            raise Exception(f"API响应错误: {response.status_code}")
         
-        # 清理和解析JSON响应
-        import json
-        # 移除可能的markdown代码块标记
+        result_data = response.json()
+        result_text = result_data['choices'][0]['message']['content']
+        print(f"🤖 OpenAI响应: {result_text[:100]}...")
+        
+        # 清理和解析JSON
         clean_text = result_text.strip()
         if clean_text.startswith('```json'):
             clean_text = clean_text[7:]
@@ -137,19 +140,17 @@ async def analyze_with_openai(text_content: str, filename: str) -> dict:
         clean_text = clean_text.strip()
         
         result = json.loads(clean_text)
-        print(f"✅ AI分析成功，返回结果: {result}")
+        print(f"✅ 分析成功: {result}")
         return result
         
     except Exception as e:
-        print(f"❌ OpenAI分析详细错误: {str(e)}")
-        print(f"❌ 错误类型: {type(e).__name__}")
-        # 回退到基础分析
+        print(f"❌ 错误: {str(e)}")
         return {
-            "content": f"AI分析遇到技术问题，文档已接收: {filename}。系统正在处理中，请稍后重试。",
-            "concepts": ["文档处理", "技术问题", "待重试"],
-            "entities": ["系统", "文档", "用户"],
-            "knowledgeTreeSuggestion": "文档管理/待处理/技术问题",
-            "confidence": 0.5
+            "content": f"分析失败: {filename}",
+            "concepts": ["错误", "分析失败"],
+            "entities": ["系统", "文档"],
+            "knowledgeTreeSuggestion": "文档管理/错误",
+            "confidence": 0.3
         }
 
 @app.post("/api/graphrag/analyze")
