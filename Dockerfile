@@ -14,7 +14,7 @@ RUN apk add --no-cache \
 WORKDIR /build
 
 # 复制并安装Python依赖到虚拟环境
-COPY requirements.zeabur.txt requirements.txt
+COPY requirements.minimal.txt requirements.txt
 RUN python -m venv /opt/venv && \
     /opt/venv/bin/pip install --upgrade pip && \
     /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
