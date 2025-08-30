@@ -15,6 +15,7 @@ sys.path.insert(0, str(project_root / "server"))
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 # 创建FastAPI应用
@@ -22,6 +23,15 @@ app = FastAPI(
     title="GraphRAG Agent API",
     description="基于知识图谱的智能文档分析系统",
     version="1.0.0"
+)
+
+# 添加CORS中间件
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 允许所有域名
+    allow_credentials=True,
+    allow_methods=["*"],  # 允许所有HTTP方法
+    allow_headers=["*"],  # 允许所有请求头
 )
 
 @app.get("/")
