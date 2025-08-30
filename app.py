@@ -84,8 +84,9 @@ async def analyze_with_openai(text_content: str, filename: str) -> dict:
             print("❌ OPENAI_API_KEY环境变量未设置")
             raise Exception("OPENAI_API_KEY未设置")
         
-        # 清理API key中的换行符和空格    
-        api_key = api_key.strip().replace('\n', '').replace(' ', '')
+        # 强力清理API key - 移除所有空白字符
+        import re
+        api_key = re.sub(r'\s+', '', api_key.strip())
         print(f"✅ 使用清理后的OpenAI API Key: {api_key[:10]}...{api_key[-4:]}")  # 强制部署标记
         
         # 限制内容长度，避免token超限
