@@ -28,11 +28,16 @@ services:
         value: openai
       - key: LANGSMITH_TRACING
         value: "false"
+      - key: DATABASE_TYPE
+        value: "memory"
+      - key: GRAPH_DATA_DIR
+        value: "/app/graph_data"
       - key: OPENAI_API_KEY
         sync: false  # 需要在Render Dashboard中手动设置
-      - key: NEO4J_URI
-        sync: false  # 需要设置Neo4j数据库连接
-      - key: NEO4J_USERNAME
-        sync: false
-      - key: NEO4J_PASSWORD
-        sync: false
+      # Neo4j配置（可选，如果要使用Neo4j则取消注释）
+      # - key: NEO4J_URI
+      #   sync: false
+      # - key: NEO4J_USERNAME
+      #   value: "neo4j"
+      # - key: NEO4J_PASSWORD
+      #   sync: false
