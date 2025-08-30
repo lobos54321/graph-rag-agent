@@ -144,13 +144,17 @@ async def analyze_with_openai(text_content: str, filename: str) -> dict:
         return result
         
     except Exception as e:
-        print(f"❌ 错误: {str(e)}")
+        print(f"❌ 详细错误信息: {str(e)}")
+        print(f"❌ 错误类型: {type(e).__name__}")
+        import traceback
+        print(f"❌ 完整traceback: {traceback.format_exc()}")
         return {
-            "content": f"分析失败: {filename}",
-            "concepts": ["错误", "分析失败"],
-            "entities": ["系统", "文档"],
-            "knowledgeTreeSuggestion": "文档管理/错误",
-            "confidence": 0.3
+            "content": f"OpenAI API调用失败: {str(e)}",
+            "concepts": ["API错误", "调用失败"],  
+            "entities": ["OpenAI", "API"],
+            "knowledgeTreeSuggestion": "系统错误/API调用失败",
+            "confidence": 0.1,
+            "debug_error": str(e)  # 添加调试信息
         }
 
 @app.post("/api/graphrag/analyze")
