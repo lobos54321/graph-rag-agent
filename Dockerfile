@@ -36,5 +36,5 @@ RUN mkdir -p cache files graph_data
 # Render自动分配端口，使用环境变量
 EXPOSE $PORT
 
-# 启动命令 - 使用独立启动脚本
-CMD ["python", "run_server.py"]
+# 启动命令 - 使用简化应用
+CMD ["python", "app.py"]

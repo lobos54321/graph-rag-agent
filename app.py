@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""
+GraphRAG Agent 主应用入口
+简化版本，避免复杂的模块导入问题
+"""
+
+import os
+import sys
+from pathlib import Path
+
+# 添加项目根目录到Python路径
+project_root = Path(__file__).parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(project_root / "server"))
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
+import uvicorn
+
+# 创建FastAPI应用
+app = FastAPI(
+    title="GraphRAG Agent API",
+    description="基于知识图谱的智能文档分析系统",
+    version="1.0.0"
+)
+
+@app.get("/")
+async def root():
+    """根路径"""
+    return {"message": "GraphRAG Agent API is running!", "version": "1.0.0"}
+
+@app.get("/api/graphrag/health")
+async def health_check():
+    """健康检查端点"""
+    return {
+        "status": "healthy",
+        "service": "GraphRAG Agent",
+        "database": "memory" if os.getenv("DATABASE_TYPE", "memory") == "memory" else "neo4j",
+        "embedding_provider": os.getenv("CACHE_EMBEDDING_PROVIDER", "openai")
+    }
+
+@app.post("/api/graphrag/analyze")
+async def analyze_document():
+    """文档分析端点 - 临时实现"""
+    return {
+        "status": "success",
+        "message": "Document analysis endpoint - coming soon",
+        "service_ready": True
+    }
+
+@app.post("/api/chat")
+async def chat():
+    """对话端点 - 临时实现"""
+    return {
+        "status": "success", 
+        "message": "Chat endpoint - coming soon",
+        "service_ready": True
+    }
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 8000))
+    print(f"🚀 启动GraphRAG Agent (简化版)...")
+    print(f"📡 端口: {port}")
+    
+    uvicorn.run(
+        "app:app",
+        host="0.0.0.0",
+        port=port,
+        log_level="info"
+    )
