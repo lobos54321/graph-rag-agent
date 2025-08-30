@@ -198,7 +198,8 @@ async def analyze_document(file: UploadFile = File(...)):
                     "size": file_size,
                     "type": file.content_type or "unknown",
                     "textLength": len(text_content) if 'text_content' in locals() else 0
-                }
+                },
+                "debug_version": "2025-08-30-v3"  # 部署确认标记
             },
             "service_ready": True
         }
