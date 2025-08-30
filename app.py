@@ -7,6 +7,9 @@ GraphRAG Agent 主应用入口
 import os
 import sys
 from pathlib import Path
+import openai
+import PyPDF2
+import io
 
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent
@@ -49,9 +52,91 @@ async def health_check():
         "embedding_provider": os.getenv("CACHE_EMBEDDING_PROVIDER", "openai")
     }
 
+def extract_text_from_file(content: bytes, filename: str) -> str:
+    """从文件内容提取文本"""
+    try:
+        if filename.lower().endswith('.pdf'):
+            # PDF文件提取
+            pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
+            text = ""
+            for page in pdf_reader.pages:
+                text += page.extract_text() + "\n"
+            return text.strip()
+        elif filename.lower().endswith(('.txt', '.md')):
+            # 文本文件
+            return content.decode('utf-8', errors='ignore')
+        else:
+            # 其他文件类型，尝试解码为文本
+            return content.decode('utf-8', errors='ignore')
+    except Exception as e:
+        print(f"文件内容提取失败: {e}")
+        return f"无法提取文件内容，文件类型: {filename.split('.')[-1] if '.' in filename else 'unknown'}"
+
+async def analyze_with_openai(text_content: str, filename: str) -> dict:
+    """使用OpenAI进行真正的AI内容分析"""
+    try:
+        # 设置OpenAI API key
+        openai.api_key = os.getenv('OPENAI_API_KEY')
+        
+        # 限制内容长度，避免token超限
+        if len(text_content) > 8000:
+            text_content = text_content[:8000] + "..."
+            
+        prompt = f"""
+请分析以下文档内容，并以JSON格式返回分析结果：
+
+文档名称: {filename}
+文档内容:
+{text_content}
+
+请返回以下格式的JSON：
+{{
+    "content": "文档内容的详细摘要(150字以内)",
+    "concepts": ["提取的关键概念1", "概念2", "概念3", "概念4"],
+    "entities": ["重要实体1", "实体2", "实体3", "实体4"],
+    "knowledgeTreeSuggestion": "建议的知识树分类路径(如:技术文档/AI开发/系统架构)",
+    "confidence": 0.9
+}}
+
+注意：
+1. 请基于文档的实际内容进行分析，不要只依赖文件名
+2. 概念和实体要从文档内容中真实提取
+3. 知识树建议要准确反映文档的主题分类
+4. 置信度为0-1之间的数字
+"""
+
+        response = openai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "你是一个专业的文档分析助手，擅长提取文档的核心内容、概念和实体。"},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.1,
+            max_tokens=800
+        )
+        
+        result_text = response.choices[0].message.content
+        print(f"🤖 OpenAI分析结果: {result_text}")
+        
+        # 解析JSON响应
+        import json
+        result = json.loads(result_text)
+        return result
+        
+    except Exception as e:
+        print(f"❌ OpenAI分析失败: {e}")
+        # 回退到基础分析
+        return {
+            "content": f"基于AI分析的文档摘要生成失败，文档名称：{filename}",
+            "concepts": ["文档分析", "内容提取"],
+            "entities": ["AI系统", "用户"],
+            "knowledgeTreeSuggestion": "文档管理/AI分析/待处理",
+            "confidence": 0.6
+        }
+
 @app.post("/api/graphrag/analyze")
 async def analyze_document(file: UploadFile = File(...)):
-    """文档分析端点"""
+    """真正的AI文档分析端点"""
     try:
         # 读取文件内容
         content = await file.read()
@@ -60,77 +145,36 @@ async def analyze_document(file: UploadFile = File(...)):
         
         print(f"📄 接收到文件: {filename}, 大小: {file_size} bytes")
         
-        # 智能识别文档类型并生成对应分析
-        filename_lower = filename.lower()
+        # 🔥 提取文件文本内容
+        text_content = extract_text_from_file(content, filename)
+        print(f"📝 提取文本长度: {len(text_content)} 字符")
         
-        # 产品需求类文档
-        if any(keyword in filename_lower for keyword in ["产品需求", "需求文档", "prd", "requirement"]):
-            analysis_content = f"这是一个产品需求文档({filename})，详细描述了产品功能需求、技术架构和业务流程。文档包含了系统设计、用户故事和技术实现方案。"
-            concepts = ["产品需求", "系统设计", "用户体验", "技术架构", "业务流程"]
-            entities = ["产品经理", "开发团队", "用户", "系统架构"]
-            suggestion = "产品开发/需求文档/产品规划"
-            
-        # 数据洞察和分析类文档
-        elif any(keyword in filename_lower for keyword in ["insight", "洞察", "分析", "analysis", "report", "报告"]):
-            analysis_content = f"这是一个洞察分析文档({filename})，包含数据分析、市场调研和用户行为分析。重点关注用户需求和市场趋势。"
-            concepts = ["数据洞察", "市场分析", "用户行为", "趋势预测"]
-            entities = ["分析师", "用户群体", "市场", "数据"]
-            suggestion = "市场分析/洞察报告/用户研究"
-            
-        # 技术文档类
-        elif any(keyword in filename_lower for keyword in ["技术", "tech", "api", "开发", "dev", "架构", "architecture"]):
-            analysis_content = f"这是一个技术文档({filename})，包含详细的技术说明、API接口和系统架构。适用于开发团队参考和实现。"
-            concepts = ["技术架构", "API设计", "系统开发", "代码实现"]
-            entities = ["开发者", "技术团队", "系统", "API"]
-            suggestion = "技术文档/开发资料/系统架构"
-            
-        # 营销策划类文档
-        elif any(keyword in filename_lower for keyword in ["营销", "marketing", "策划", "推广", "运营", "campaign"]):
-            analysis_content = f"这是一个营销策划文档({filename})，包含市场推广方案、用户获取策略和运营计划。"
-            concepts = ["营销策略", "用户获取", "品牌推广", "运营规划"]
-            entities = ["营销团队", "目标用户", "品牌", "渠道"]
-            suggestion = "营销策划/推广方案/运营计划"
-            
-        # 财务商业类文档  
-        elif any(keyword in filename_lower for keyword in ["财务", "finance", "商业", "business", "预算", "budget"]):
-            analysis_content = f"这是一个商业财务文档({filename})，包含财务规划、预算分析和商业模式设计。"
-            concepts = ["财务规划", "商业模式", "预算管理", "成本分析"]
-            entities = ["财务团队", "投资者", "成本中心", "收入来源"]
-            suggestion = "商业管理/财务规划/预算分析"
-            
-        # 培训教育类文档
-        elif any(keyword in filename_lower for keyword in ["培训", "training", "教育", "education", "学习", "tutorial"]):
-            analysis_content = f"这是一个培训教育文档({filename})，包含学习内容、培训计划和教育资源。"
-            concepts = ["培训计划", "学习内容", "教育方法", "知识传递"]
-            entities = ["培训师", "学员", "教育内容", "学习目标"]
-            suggestion = "教育培训/学习资源/培训计划"
-            
-        # 会议记录类文档
-        elif any(keyword in filename_lower for keyword in ["会议", "meeting", "记录", "minutes", "讨论", "discussion"]):
-            analysis_content = f"这是一个会议记录文档({filename})，包含会议讨论内容、决策事项和后续行动计划。"
-            concepts = ["会议讨论", "决策记录", "行动计划", "团队协作"]
-            entities = ["参会人员", "决策者", "行动负责人", "会议主题"]
-            suggestion = "会议管理/会议记录/决策跟踪"
-            
-        # 默认通用文档
+        # 🤖 使用OpenAI进行真正的AI分析
+        if text_content and len(text_content) > 50:  # 确保有足够内容分析
+            ai_analysis = await analyze_with_openai(text_content, filename)
         else:
-            analysis_content = f"这是一个综合性文档({filename})，包含详细的信息和说明。文档大小约{file_size//1024}KB，需要进一步分析内容主题。"
-            concepts = ["文档内容", "信息整理", "知识管理"]
-            entities = ["文档作者", "相关团队", "内容主题"]
-            suggestion = "文档管理/综合资料/待分类"
+            # 如果内容太少，使用基础分析
+            ai_analysis = {
+                "content": f"文档内容较少或无法提取，文件名：{filename}",
+                "concepts": ["文档处理", "内容提取"],
+                "entities": ["文档", "系统"],
+                "knowledgeTreeSuggestion": "文档管理/待分类/需要处理",
+                "confidence": 0.5
+            }
         
         return {
             "status": "success",
             "analysis": {
-                "content": analysis_content,
-                "concepts": concepts,
-                "entities": entities,
-                "knowledgeTreeSuggestion": suggestion,
-                "confidence": 0.88,
+                "content": ai_analysis.get("content", "AI分析完成"),
+                "concepts": ai_analysis.get("concepts", []),
+                "entities": ai_analysis.get("entities", []),
+                "knowledgeTreeSuggestion": ai_analysis.get("knowledgeTreeSuggestion", "文档管理/AI分析"),
+                "confidence": ai_analysis.get("confidence", 0.85),
                 "fileInfo": {
                     "filename": filename,
                     "size": file_size,
-                    "type": file.content_type or "unknown"
+                    "type": file.content_type or "unknown",
+                    "textLength": len(text_content) if 'text_content' in locals() else 0
                 }
             },
             "service_ready": True
