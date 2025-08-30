@@ -1,0 +1,48 @@
+# API服务专用依赖 - 最精简版本
+# 移除frontend UI依赖，保留核心GraphRAG功能
+
+# 核心框架
+fastapi>=0.100.0
+uvicorn[standard]>=0.18.0
+pydantic>=2.0.0
+
+# 文档处理
+PyPDF2>=3.0.0
+python-docx>=0.8.11
+python-dotenv>=1.0.0
+pyyaml>=6.0
+textract==1.6.3
+
+# AI和向量
+langchain>=0.1.0
+langchain-core>=0.1.0
+langchain-openai>=0.1.0
+langchain_neo4j>=0.4.0
+openai>=1.0.0
+
+# 图数据库
+neo4j>=5.0.0
+graphdatascience>=1.0.0
+
+# 向量嵌入
+sentence-transformers>=2.0.0
+
+# 中文处理 - 用jieba替代HanLP
+jieba>=0.42.0
+
+# 数据处理
+pandas>=2.0.0
+numpy>=1.24.0
+
+# 替代scikit-learn的余弦相似度
+# numpy已包含向量计算功能
+
+# 网络请求
+requests>=2.31.0
+aiohttp>=3.8.0
+
+# 基础工具
+python-multipart
+rich
+tqdm
+psutil

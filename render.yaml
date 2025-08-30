@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: graphrag-agent
+    env: docker
+    dockerfilePath: ./Dockerfile.render
+    plan: free
+    region: oregon
+    buildCommand: ""
+    startCommand: ""
+    envVars:
+      - key: PYTHONPATH
+        value: /app
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: OPENAI_BASE_URL
+        value: https://api.openai.com/v1
+      - key: OPENAI_EMBEDDINGS_MODEL
+        value: text-embedding-3-large
+      - key: OPENAI_LLM_MODEL
+        value: gpt-4o-mini
+      - key: TEMPERATURE
+        value: "0"
+      - key: MAX_TOKENS
+        value: "2000"
+      - key: VERBOSE
+        value: "true"
+      - key: CACHE_EMBEDDING_PROVIDER
+        value: openai
+      - key: LANGSMITH_TRACING
+        value: "false"
+      - key: OPENAI_API_KEY
+        sync: false  # 需要在Render Dashboard中手动设置
+      - key: NEO4J_URI
+        sync: false  # 需要设置Neo4j数据库连接
+      - key: NEO4J_USERNAME
+        sync: false
+      - key: NEO4J_PASSWORD
+        sync: false
