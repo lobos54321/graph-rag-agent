@@ -1,36 +1,52 @@
-# 使用官方 Python 3.10 镜像
-FROM python:3.10-slim
+# 多阶段构建，减少最终镜像大小
+FROM python:3.10-alpine as builder
+
+# 安装构建依赖
+RUN apk add --no-cache \
+    gcc \
+    musl-dev \
+    libffi-dev \
+    openssl-dev \
+    python3-dev \
+    build-base
 
 # 设置工作目录
-WORKDIR /app
+WORKDIR /build
+
+# 复制并安装Python依赖到虚拟环境
+COPY requirements.zeabur.txt requirements.txt
+RUN python -m venv /opt/venv && \
+    /opt/venv/bin/pip install --upgrade pip && \
+    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+
+# 生产阶段
+FROM python:3.10-alpine
+
+# 安装运行时依赖（最小化）
+RUN apk add --no-cache \
+    curl \
+    poppler-utils \
+    && rm -rf /var/cache/apk/*
+
+# 从构建阶段复制虚拟环境
+COPY --from=builder /opt/venv /opt/venv
 
 # 设置环境变量
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
+ENV PATH="/opt/venv/bin:$PATH"
 
-# 安装系统依赖
-RUN apt-get update && apt-get install -y \
-    python-dev-is-python3 \
-    libxml2-dev \
-    libxslt1-dev \
-    antiword \
-    unrtf \
-    poppler-utils \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+# 设置工作目录
+WORKDIR /app
 
-# 复制requirements文件
-COPY requirements.txt .
+# 复制应用代码（仅必要文件）
+COPY server/ ./server/
+COPY graph_rag/ ./graph_rag/
+COPY *.py ./
+COPY setup.py ./
 
-# 升级pip并安装Python依赖
-RUN pip install --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
-
-# 复制应用代码
-COPY . .
-
-# 安装项目
-RUN pip install -e .
+# 创建必要目录
+RUN mkdir -p cache files
 
 # 暴露端口
 EXPOSE 8000
